@@ -123,7 +123,7 @@ const t = k => I18N[LANG][k];
 
 const DEFAULT_CODES = ['LSE','ASL','BSL','LSB','LSM','LSF','ISL','DGS'];
 const LS_KEY = 'jwSignMosaic.v2';
-const COLLECTIONS = [
+function collectionsFor() { return [
   ['StudioMonthlyPrograms', 'JW Broadcasting'],
   ['VODStudio', LANG === 'es' ? 'JW Broadcasting (archivo)' : 'JW Broadcasting (archive)'],
   ['VODProgramsEvents', LANG === 'es' ? 'Programas espirituales' : 'Spiritual programs'],
@@ -138,7 +138,7 @@ const COLLECTIONS = [
   ['VODBible', LANG === 'es' ? 'La Biblia' : 'The Bible'],
   ['VODMovies', LANG === 'es' ? 'Producciones audiovisuales' : 'Movies'],
   ['VODIntExp', LANG === 'es' ? 'Entrevistas y experiencias' : 'Interviews and experiences'],
-];
+]; }
 const grid = document.getElementById('grid');
 const tiles = new Map(); // code -> entry
 let ALL_SIGN_LANGS = [];
@@ -294,7 +294,7 @@ async function addTile(lang) {
   const sel = tile.querySelector('.programs');
   const wrap = tile.querySelector('.videowrap');
 
-  for (const [key, name] of COLLECTIONS) {
+  for (const [key, name] of collectionsFor()) {
     const o = document.createElement('option'); o.value = key; o.textContent = name; selColl.appendChild(o);
   }
 
@@ -340,13 +340,17 @@ async function addTile(lang) {
   await fillPrograms(entry, entry.prog);
 }
 
-function refreshGlobalPicker() {
+function refreshGlobalPicker(force) {
   const gc = document.getElementById('globColl');
   const gp = document.getElementById('globProg');
+  if (!force && (document.activeElement === gc || document.activeElement === gp)) return; // no reconstruir mientras el usuario lo usa
+  const first = [...tiles.values()].find(x => x.items && x.items.length);
+  const fp = first ? first.coll + ':' + first.items.length + ':' + (first.items[0] && first.items[0].naturalKey) + ':' + LANG : '';
+  if (!force && fp === refreshGlobalPicker._fp && gp.options.length) return; // nada nuevo
+  refreshGlobalPicker._fp = fp;
   const prevColl = gc.value, prevProg = gp.value;
   gc.innerHTML = ''; gp.innerHTML = '';
-  for (const [key, name] of COLLECTIONS) { const o = document.createElement('option'); o.value = key; o.textContent = name; gc.appendChild(o); }
-  const first = [...tiles.values()].find(x => x.items && x.items.length);
+  for (const [key, name] of collectionsFor()) { const o = document.createElement('option'); o.value = key; o.textContent = name; gc.appendChild(o); }
   if (first) {
     gc.value = first.coll;
     for (const it of first.items.slice(0, 120)) { const o = document.createElement('option'); o.value = normKey(it); o.textContent = it.title; gp.appendChild(o); }
@@ -424,7 +428,23 @@ function setLang(l) {
   if (l === LANG) return;
   LANG = l;
   localStorage.setItem('jwSignMosaic.lang', l);
-  location.reload(); // re-render completo: textos, colecciones y etiquetas
+  applyI18n();
+  for (const x of tiles.values()) { // re-traducir en caliente, sin tocar los vídeos
+    const prev = x.selColl.value;
+    x.selColl.innerHTML = '';
+    for (const [key, name] of collectionsFor()) { const o = document.createElement('option'); o.value = key; o.textContent = name; x.selColl.appendChild(o); }
+    x.selColl.value = prev;
+    if (x.status.style.display !== 'none' && !x.status.classList.contains('err')) {
+      x.status.textContent = x.tile.classList.contains('novideo') ? t('noVideoPub') : t('loading');
+    } else if (x.status.classList.contains('err')) {
+      x.status.textContent = t('failMsg');
+    }
+    x.tile.querySelector('.audio').title = t('audioTip');
+    x.tile.querySelector('.fs').title = t('fsTip');
+    x.tile.querySelector('.rm').title = t('rmTip');
+  }
+  refreshGlobalPicker(true);
+  renderAddList();
 }
 document.getElementById('langES').addEventListener('click', () => setLang('es'));
 document.getElementById('langEN').addEventListener('click', () => setLang('en'));
