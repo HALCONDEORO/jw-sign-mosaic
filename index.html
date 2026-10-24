@@ -337,7 +337,7 @@ document.getElementById('globApply').addEventListener('click', async () => {
 // Catálogo completo de lenguas de signos con buscador
 async function loadCatalog() {
   try {
-    const d = await fetchJSON(`${API}/languages/E/web?clientType=www`);
+    const d = await fetchJSON(`${API}/languages/E/all?clientType=www`);
     ALL_SIGN_LANGS = (d.languages || []).filter(l => l.isSignLanguage).sort((a, b) => a.name.localeCompare(b.name));
   } catch (e) { ALL_SIGN_LANGS = []; }
   renderAddList();
