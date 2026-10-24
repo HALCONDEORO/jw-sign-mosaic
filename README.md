@@ -1,34 +1,24 @@
-# JW Sign Mosaic
+# JW Sign Language Mosaic
 
-Watch the same JW Broadcasting program in several sign languages at once, in a single video-wall page.
+Watch the same JW Broadcasting program — or any sign-language video publication from jw.org — in several sign languages at once, side by side, straight from the official jw.org CDN.
 
-A personal, unofficial tool: all videos are streamed directly from jw.org's public API and CDN at low resolution (240p per tile). Nothing is downloaded or re-hosted.
+**Live demo: https://halcondeoro.github.io/jw-sign-mosaic/**
 
 ## Features
 
-- Responsive grid of tiles, one per sign language (default: Spanish, American, British, Brazilian, Mexican, French, Italian and German Sign Language).
-- Each tile streams the latest JW Broadcasting monthly program in that language; a per-tile selector switches to earlier programs.
-- Global controls: play all, pause all, and sync (jumps every tile to the same position and resumes).
-- One-audio-at-a-time: the speaker button on a tile unmutes it and mutes the rest (videos start muted so autoplay works).
-- Fullscreen per tile; add or remove languages from the picker (choice persists in `localStorage`).
+- **All sign languages**: the full jw.org catalog of 50 sign languages, searchable by name or code ("Añadir lengua" panel). The 8 most common ones load by default.
+- **Publication picker**: each tile can play any video publication available in that language — JW Broadcasting monthly programs plus the library collections (spiritual programs, music, series, children's videos, Bible, movies, interviews...), grouped as they appear on jw.org.
+- **Global apply**: pick a collection and program once and apply it to every tile at once (matched across languages by the program's language-agnostic key).
+- Play all / pause all / one-click resync (jumps every tile to the furthest timestamp).
+- Per-tile audio toggle (only one tile unmuted at a time), fullscreen, and removal.
+- Your selection (languages + collection + program per tile) persists in `localStorage`.
+- **Limit: 16 simultaneous languages.** More parallel video streams degrade browser playback; the app refuses to add beyond that and says so. Chosen as a safe ceiling for a typical desktop; all videos are the 240p progressive MP4 rendition to keep bandwidth and decode load low.
 
-## How it works
+## Tech
 
-- `index.html` is the whole app: no build, no backend.
-- Language catalog and media lists come from the public mediator API at `https://data.jw-api.org/mediator/v1` (the same endpoint jw.org's own website uses; CORS-enabled, no key).
-- Video files are progressive MP4s served from `*.jw-cdn.org`; tiles pick the 240p variant.
+Single `index.html`, no build step, no dependencies. Data comes from the public jw.org mediator API (`data.jw-api.org/mediator/v1`); videos stream from the official CDN. Nothing is proxied, stored, or tracked.
 
-## Run
-
-Open `index.html` in a browser, or serve the folder statically (`python3 -m http.server`). To deploy, push to GitHub and enable GitHub Pages on the branch root.
-
-## Configuration
-
-The default language set lives in `DEFAULT_LANGS` at the top of the script in `index.html`. Any sign language available on jw.org can be added from the in-page picker.
-
-## Legal
-
-Not affiliated with or endorsed by jw.org / JW Broadcasting. Content belongs to its owners; this page only links to their public streams. Personal use.
+Personal, unaffiliated project. Not endorsed by JW.org or its publishers.
 
 ## License
 
