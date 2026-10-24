@@ -213,7 +213,7 @@ function pickFile(media) {
   return preferred.url;
 }
 
-function normKey(it) { return (it && (it.agnostic || it.naturalKey)) ? String(it.agnostic || it.naturalKey).replace(/(_[A-Z]{2,5})?_\d+_VIDEO$/, '') : ''; }
+function normKey(it) { return (it && (it.agnostic || it.naturalKey)) ? String(it.agnostic || it.naturalKey).replace(/_[A-Z]{2,5}(_\d+_VIDEO)$/, '\$1') : ''; }
 function allVideos() { return [...tiles.values()].map(x => x.video); }
 
 function muteOthers(except) {
