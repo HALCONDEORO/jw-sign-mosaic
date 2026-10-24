@@ -199,7 +199,7 @@ async function loadTileProgram(entry, item) {
     const src = pickFile(item.media || {});
     if (src) {
       status.style.display = ''; status.classList.remove('err'); status.textContent = 'Cargando…';
-      video.src = src; video.play().catch(() => {});
+      video.src = src; video.load(); video.play().catch(() => {});
     } else { status.textContent = 'Sin MP4 compatible.'; status.classList.add('err'); }
   } catch (e) { status.textContent = 'Error al cargar (' + e.message + ')'; status.classList.add('err'); }
   saveState(); refreshGlobalPicker();
@@ -265,7 +265,7 @@ async function addTile(lang) {
   }
 
   const video = document.createElement('video');
-  video.muted = true; video.autoplay = true; video.playsInline = true; video.controls = true; video.preload = 'metadata';
+  video.muted = true; video.autoplay = true; video.playsInline = true; video.controls = true; video.preload = 'auto';
   wrap.appendChild(video);
   video.addEventListener('playing', () => { status.style.display = 'none'; });
   let retried = false;
@@ -373,6 +373,12 @@ document.addEventListener('click', (e) => {
 
 document.getElementById('playAll').addEventListener('click', () => allVideos().forEach(v => v.play().catch(() => {})));
 document.getElementById('pauseAll').addEventListener('click', () => allVideos().forEach(v => v.pause()));
+setInterval(() => {
+  for (const t of tiles.values()) {
+    if (t.video.src && t.video.paused && !t.tile.classList.contains('novideo')) t.video.play().catch(() => {});
+  }
+}, 15000);
+
 document.getElementById('syncAll').addEventListener('click', () => {
   const vs = allVideos().filter(v => !isNaN(v.duration));
   if (!vs.length) return;
