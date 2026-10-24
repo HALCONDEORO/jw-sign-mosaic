@@ -93,6 +93,8 @@ const I18N = {
     forAll: 'Para todas:', applyAll: 'Aplicar a todas',
     counter: n => n + ' / ' + MAX_TILES + ' lenguas',
     loading: 'Cargando…', retrying: 'Reintentando…',
+    slowMsg: 'Sigue sin cargar. Toca aquí para reintentar.',
+    noEquiv: 'Esta publicación no está disponible en esta lengua.',
     loadErr: e => 'Error al cargar (' + e + ')',
     failMsg: 'No se pudo cargar el vídeo. Pulsa Reproducir todos para reintentar.',
     noVideoPub: 'Sin vídeo de esta publicación en esta lengua.',
@@ -109,6 +111,8 @@ const I18N = {
     forAll: 'For all:', applyAll: 'Apply to all',
     counter: n => n + ' / ' + MAX_TILES + ' languages',
     loading: 'Loading…', retrying: 'Retrying…',
+    slowMsg: 'Still not loading. Tap here to retry.',
+    noEquiv: 'This publication is not available in this language.',
     loadErr: e => 'Load error (' + e + ')',
     failMsg: 'The video failed to load. Press Play all to retry.',
     noVideoPub: 'No video of this publication in this language.',
@@ -237,12 +241,13 @@ async function loadTileProgram(entry, item) {
     if (src) {
       status.style.display = ''; status.classList.remove('err'); status.textContent = t('loading');
       video.src = src; video.load(); video.play().catch(() => {});
+      if (entry.armWatchdog) entry.armWatchdog();
     } else { status.textContent = t('noMp4'); status.classList.add('err'); }
   } catch (e) { status.textContent = t('loadErr')(e.message); status.classList.add('err'); }
   saveState(); refreshGlobalPicker();
 }
 
-async function fillPrograms(entry, keepProg) {
+async function fillPrograms(entry, keepProg, strict) {
   const { code, sel } = entry;
   sel.innerHTML = '';
   const items = await fetchCollection(code, entry.coll);
@@ -266,6 +271,17 @@ async function fillPrograms(entry, keepProg) {
     const nk = normKey({ naturalKey: keepProg });
     const found = items.findIndex(it => it.naturalKey === keepProg || (nk && normKey(it) === nk));
     if (found >= 0) idx = found;
+    else if (strict) { // pidieron una publicación concreta y no hay equivalente en esta lengua
+      sel.selectedIndex = -1;
+      entry.prog = '';
+      const { status, tile, video } = entry;
+      tile.classList.add('novideo');
+      video.pause(); video.removeAttribute('src'); video.load();
+      status.style.display = ''; status.classList.remove('err');
+      status.textContent = t('noEquiv');
+      saveState(); refreshGlobalPicker();
+      return;
+    }
   }
   sel.selectedIndex = idx;
   await loadTileProgram(entry, items[idx]);
@@ -301,22 +317,40 @@ async function addTile(lang) {
   const video = document.createElement('video');
   video.muted = true; video.autoplay = true; video.playsInline = true; video.controls = true; video.preload = 'auto';
   wrap.appendChild(video);
-  video.addEventListener('playing', () => { status.style.display = 'none'; });
+  let loadTimer = null;
+  const armWatchdog = () => {
+    clearTimeout(loadTimer);
+    loadTimer = setTimeout(() => {
+      if (video.src && !video.error && video.readyState < 3 && !tile.classList.contains('novideo')) {
+        status.style.display = ''; status.classList.add('err');
+        status.textContent = t('slowMsg');
+      }
+    }, 12000);
+  };
+  video.addEventListener('playing', () => { clearTimeout(loadTimer); status.style.display = 'none'; });
   let retried = false;
   video.addEventListener('error', () => {
+    clearTimeout(loadTimer);
     if (!retried && video.src) {
       retried = true;
       status.textContent = t('retrying');
       const src = video.src;
-      setTimeout(() => { video.src = src; video.load(); video.play().catch(() => {}); }, 3000);
+      setTimeout(() => { video.src = src; video.load(); video.play().catch(() => {}); armWatchdog(); }, 3000);
     } else {
       status.textContent = t('failMsg');
       status.classList.add('err');
     }
   });
+  status.style.cursor = 'pointer';
+  status.addEventListener('click', () => {
+    if (status.classList.contains('err') && video.src) {
+      status.classList.remove('err'); status.textContent = t('loading');
+      video.load(); video.play().catch(() => {}); armWatchdog();
+    }
+  });
 
   const entry = { code: lang.code, coll: lang.coll || 'StudioMonthlyPrograms', prog: lang.prog || '',
-                  video, audioBtn: tile.querySelector('.audio'), tile, sel, selColl, status, items: [] };
+                  video, audioBtn: tile.querySelector('.audio'), tile, sel, selColl, status, items: [], armWatchdog };
   tiles.set(lang.code, entry);
   selColl.value = entry.coll;
   updateCounter(); saveState(); refreshGlobalPicker();
@@ -337,7 +371,18 @@ async function addTile(lang) {
     updateCounter(); saveState(); refreshGlobalPicker(); renderAddList();
   });
 
-  await fillPrograms(entry, entry.prog);
+  // lengua nueva: heredar la publicación que ya suena en las demás tarjetas
+  let inheritProg = '';
+  if (!lang.coll && !lang.prog) {
+    const ref = [...tiles.values()].find(x => x.code !== lang.code && x.prog && x.items && x.items.length);
+    if (ref) {
+      const refIt = ref.items.find(y => y.naturalKey === ref.prog);
+      entry.coll = ref.coll;
+      selColl.value = ref.coll;
+      inheritProg = refIt ? refIt.naturalKey : '';
+    }
+  }
+  await fillPrograms(entry, entry.prog || inheritProg, !!inheritProg);
 }
 
 let globProgReq = 0;
@@ -382,6 +427,7 @@ document.getElementById('globApply').addEventListener('click', async () => {
       const it = x.items.find(y => normKey(y) === nk);
       if (it) { x.sel.value = it.naturalKey; await loadTileProgram(x, it); }
     }
+    await new Promise(r => setTimeout(r, 250)); // respiro entre tarjetas
   }
 });
 
@@ -482,8 +528,10 @@ setInterval(() => {
   applyI18n();
   await loadCatalog();
   const state = loadState();
-  const jobs = state.langs.slice(0, MAX_TILES).map(l => addTile({ ...l, label: l.label || labelFor(l.code) }));
-  await Promise.all(jobs); // carga en paralelo: todos los vídeos empiezan a la vez, sin esperar al scroll
+  for (const l of state.langs.slice(0, MAX_TILES)) {
+    await addTile({ ...l, label: l.label || labelFor(l.code) });
+    await new Promise(r => setTimeout(r, 400)); // escalonar: no ahogar la red con N vídeos a la vez
+  }
 })();
 </script>
 </body>
