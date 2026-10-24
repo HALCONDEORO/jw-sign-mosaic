@@ -28,6 +28,9 @@
   video { display:block; width:100%; aspect-ratio:16/9; }
   .status { padding:10px; color:var(--muted); font-size:13px; }
   .status.err { color:#f85149; }
+  .tile.novideo { opacity:.55; }
+  .tile.novideo .videowrap { display:none; }
+  .tile.novideo .status { color:var(--muted); font-style:italic; }
   footer { padding:12px 18px; color:var(--muted); font-size:12px; border-top:1px solid var(--border); }
   .addwrap { position:relative; }
   #addPanel { position:absolute; right:0; top:calc(100% + 4px); width:320px; max-height:320px; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.5); z-index:20; }
@@ -181,9 +184,17 @@ function muteOthers(except) {
 }
 
 async function loadTileProgram(entry, item) {
-  const { video, status } = entry;
+  const { video, status, tile } = entry;
   entry.prog = item ? item.naturalKey : '';
-  if (!item) { status.textContent = 'Sin vídeos en esta colección.'; status.classList.add('err'); return; }
+  if (!item) {
+    tile.classList.add('novideo');
+    video.pause(); video.removeAttribute('src'); video.load();
+    status.style.display = ''; status.classList.remove('err');
+    status.textContent = 'Sin vídeo de esta publicación en esta lengua.';
+    saveState(); refreshGlobalPicker();
+    return;
+  }
+  tile.classList.remove('novideo');
   try {
     const src = pickFile(item.media || {});
     if (src) {
