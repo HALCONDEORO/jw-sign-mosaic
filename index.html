@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mosaico de Lenguas de Signos</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  header { padding:14px 18px 10px; border-bottom:1px solid var(--border); }
+  h1 { margin:0 0 2px; font-size:20px; font-weight:600; }
+  .sub { color:var(--muted); font-size:13px; }
+  .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 18px; border-bottom:1px solid var(--border); }
+  button, select { background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:14px; cursor:pointer; }
+  button:hover, select:hover { border-color:var(--accent); }
+  button.primary { background:#1f6feb; border-color:#1f6feb; color:#fff; font-weight:600; }
+  #grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:10px; padding:12px; }
+  .tile { background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden; display:flex; flex-direction:column; }
+  .tile:fullscreen { border-radius:0; }
+  .tile:fullscreen video { flex:1; height:auto; }
+  .tile-head { display:flex; align-items:center; gap:6px; padding:6px 8px; }
+  .tile-head .lang { font-weight:600; font-size:13px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tile-head button { padding:3px 7px; font-size:13px; }
+  .tile select.programs { margin:0 8px 6px; font-size:12px; max-width:calc(100% - 16px); }
+  .videowrap { position:relative; background:#000; }
+  video { display:block; width:100%; aspect-ratio:16/9; }
+  .status { padding:10px; color:var(--muted); font-size:13px; }
+  .status.err { color:#f85149; }
+  footer { padding:12px 18px; color:var(--muted); font-size:12px; border-top:1px solid var(--border); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Mosaico de Lenguas de Signos</h1>
+  <div class="sub">El mismo programa de JW Broadcasting en varias lenguas de signos a la vez. Vídeo en directo desde jw.org.</div>
+</header>
+<div class="controls">
+  <button class="primary" id="playAll">▶ Reproducir todos</button>
+  <button id="pauseAll">⏸ Pausar todos</button>
+  <button id="syncAll">⟳ Sincronizar</button>
+  <span style="flex:1"></span>
+  <select id="langPicker"><option value="">Añadir lengua…</option></select>
+</div>
+<div id="grid"></div>
+<footer>Vídeos servidos directamente desde los servidores de jw.org (API pública y CDN). Herramienta personal, sin afiliación ni respaldo oficial.</footer>
+<script>
+'use strict';
+const API = 'https://data.jw-api.org/mediator/v1';
+const DEFAULT_LANGS = [
+  { code:'LSE', label:'Española (LSE)' },
+  { code:'ASL', label:'Americana (ASL)' },
+  { code:'BSL', label:'Británica (BSL)' },
+  { code:'LSB', label:'Brasileña (LSB)' },
+  { code:'LSM', label:'Mexicana (LSM)' },
+  { code:'LSF', label:'Francesa (LSF)' },
+  { code:'ISL', label:'Italiana (ISL)' },
+  { code:'DGS', label:'Alemana (DGS)' },
+];
+const LS_KEY = 'jwSignMosaic.langs.v1';
+const grid = document.getElementById('grid');
+const tiles = new Map(); // code -> {video, audioBtn}
+
+function loadLangs() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+    if (Array.isArray(saved) && saved.length) return saved;
+  } catch (e) {}
+  return DEFAULT_LANGS.slice();
+}
+function saveLangs(langs) { localStorage.setItem(LS_KEY, JSON.stringify(langs)); }
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+async function fetchPrograms(code) {
+  // JW Broadcasting monthly programs; fallbacks in case a language organizes differently.
+  const candidates = ['StudioMonthlyPrograms', 'VODStudio'];
+  for (const key of candidates) {
+    try {
+      const d = await fetchJSON(`${API}/categories/${code}/${key}?detailed=1&clientType=www`);
+      const cat = d.category || {};
+      if (cat.media && cat.media.length) return cat.media;
+      for (const sub of (cat.subcategories || [])) {
+        if (sub.media && sub.media.length) return sub.media;
+      }
+    } catch (e) { /* try next */ }
+  }
+  return [];
+}
+
+function pickFile(media) {
+  const mp4s = (media.files || [])
+    .filter(f => f.mimetype === 'video/mp4' && f.progressiveDownloadURL)
+    .map(f => {
+      const m = f.progressiveDownloadURL.match(/_r(\d+)P\.mp4/);
+      return { url: f.progressiveDownloadURL, res: m ? parseInt(m[1], 10) : 9999 };
+    })
+    .sort((a, b) => a.res - b.res);
+  if (!mp4s.length) return null;
+  const preferred = mp4s.find(f => f.res === 240) || mp4s[0];
+  return preferred.url;
+}
+
+function allVideos() { return [...tiles.values()].map(t => t.video); }
+
+function muteOthers(except) {
+  for (const t of tiles.values()) {
+    const on = (t === except);
+    t.video.muted = !on;
+    t.audioBtn.textContent = on ? '🔊' : '🔇';
+  }
+}
+
+async function addTile(lang) {
+  if (tiles.has(lang.code)) return;
+  const tile = document.createElement('div');
+  tile.className = 'tile';
+  tile.innerHTML = `
+    <div class="tile-head">
+      <span class="lang"></span>
+      <button class="audio" title="Escuchar esta lengua">🔇</button>
+      <button class="fs" title="Pantalla completa">⛶</button>
+      <button class="rm" title="Quitar">✕</button>
+    </div>
+    <select class="programs" hidden></select>
+    <div class="videowrap"></div>
+    <div class="status">Cargando…</div>`;
+  grid.appendChild(tile);
+  tile.querySelector('.lang').textContent = lang.label;
+  const status = tile.querySelector('.status');
+  const sel = tile.querySelector('.programs');
+  const wrap = tile.querySelector('.videowrap');
+
+  let media;
+  try {
+    media = await fetchPrograms(lang.code);
+  } catch (e) {
+    status.textContent = 'Error al cargar (' + e.message + ')';
+    status.classList.add('err');
+    return;
+  }
+  if (!media.length) {
+    status.textContent = 'Esta lengua no tiene vídeos web disponibles.';
+    status.classList.add('err');
+    return;
+  }
+
+  const video = document.createElement('video');
+  video.muted = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.controls = true;
+  video.preload = 'metadata';
+  wrap.appendChild(video);
+  video.addEventListener('playing', () => { status.style.display = 'none'; });
+  let retried = false;
+  video.addEventListener('error', () => {
+    if (!retried && video.src) {
+      retried = true;
+      status.textContent = 'Reintentando…';
+      const src = video.src;
+      setTimeout(() => { video.src = src; video.load(); video.play().catch(() => {}); }, 3000);
+    } else {
+      status.textContent = 'No se pudo cargar el vídeo. Pulsa Reproducir todos para reintentar.';
+      status.classList.add('err');
+    }
+  });
+
+  const entry = { video, audioBtn: tile.querySelector('.audio'), tile };
+  tiles.set(lang.code, entry);
+
+  for (const m of media.slice(0, 24)) {
+    const o = document.createElement('option');
+    o.value = m.naturalKey || m.title;
+    o.textContent = m.title;
+    sel.appendChild(o);
+  }
+  sel.hidden = media.length < 2;
+  function load(idx) {
+    const src = pickFile(media[idx]);
+    if (src) { status.style.display = ''; status.textContent = 'Cargando…'; video.src = src; video.play().catch(() => {}); }
+    else { status.textContent = 'Sin MP4 compatible.'; status.classList.add('err'); }
+  }
+  sel.addEventListener('change', () => load(sel.selectedIndex));
+  load(0);
+
+  entry.audioBtn.addEventListener('click', () => muteOthers(entry));
+  tile.querySelector('.fs').addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else tile.requestFullscreen().catch(() => {});
+  });
+  tile.querySelector('.rm').addEventListener('click', () => {
+    video.pause(); video.removeAttribute('src'); video.load();
+    tiles.delete(lang.code); tile.remove();
+    const langs = loadLangs().filter(l => l.code !== lang.code);
+    saveLangs(langs);
+  });
+}
+
+document.getElementById('playAll').addEventListener('click', () => allVideos().forEach(v => v.play().catch(() => {})));
+document.getElementById('pauseAll').addEventListener('click', () => allVideos().forEach(v => v.pause()));
+document.getElementById('syncAll').addEventListener('click', () => {
+  const vs = allVideos().filter(v => !isNaN(v.duration));
+  if (!vs.length) return;
+  const t = Math.max(...vs.map(v => v.currentTime));
+  vs.forEach(v => { v.currentTime = t; v.play().catch(() => {}); });
+});
+
+async function fillLangPicker() {
+  try {
+    const d = await fetchJSON(`${API}/languages/E/web?clientType=www`);
+    const signs = (d.languages || []).filter(l => /sign/i.test(l.name)).sort((a, b) => a.name.localeCompare(b.name));
+    const picker = document.getElementById('langPicker');
+    for (const l of signs) {
+      const o = document.createElement('option');
+      o.value = l.code;
+      o.textContent = l.name + ' (' + l.code + ')';
+      picker.appendChild(o);
+    }
+    picker.addEventListener('change', async () => {
+      const code = picker.value;
+      if (!code) return;
+      const l = signs.find(x => x.code === code);
+      const langs = loadLangs();
+      if (!langs.some(x => x.code === code)) {
+        const entry = { code, label: (l ? l.name : code) + ' (' + code + ')' };
+        langs.push(entry); saveLangs(langs);
+        await addTile(entry);
+      }
+      picker.value = '';
+    });
+  } catch (e) { /* picker stays with default option only */ }
+}
+
+(async function init() {
+  const langs = loadLangs();
+  fillLangPicker();
+  for (const l of langs) addTile(l);
+})();
+</script>
+</body>
+</html>
