@@ -12,7 +12,8 @@
   h1 { margin:0 0 2px; font-size:20px; font-weight:600; }
   .sub { color:var(--muted); font-size:13px; }
   .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 18px; border-bottom:1px solid var(--border); }
-  button, select { background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:14px; cursor:pointer; }
+  button, select, input { background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:14px; }
+  button { cursor:pointer; }
   button:hover, select:hover { border-color:var(--accent); }
   button.primary { background:#1f6feb; border-color:#1f6feb; color:#fff; font-weight:600; }
   #grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:10px; padding:12px; }
@@ -28,25 +29,49 @@
   .status { padding:10px; color:var(--muted); font-size:13px; }
   .status.err { color:#f85149; }
   footer { padding:12px 18px; color:var(--muted); font-size:12px; border-top:1px solid var(--border); }
+  .addwrap { position:relative; }
+  #addPanel { position:absolute; right:0; top:calc(100% + 4px); width:320px; max-height:320px; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.5); z-index:20; }
+  #addPanel[hidden] { display:none; }
+  #addSearch { margin:8px; }
+  #addList { overflow-y:auto; }
+  #addList button { display:block; width:100%; text-align:left; border:0; border-radius:0; background:none; padding:7px 10px; font-size:13px; }
+  #addList button:hover { background:#21262d; }
+  #addList button.added { color:var(--muted); }
+  .counter { color:var(--muted); font-size:13px; }
+  .globrow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:8px 18px; border-bottom:1px solid var(--border); background:#0a0d12; font-size:13px; color:var(--muted); }
 </style>
 </head>
 <body>
 <header>
   <h1>Mosaico de Lenguas de Signos</h1>
-  <div class="sub">El mismo programa de JW Broadcasting en varias lenguas de signos a la vez. Vídeo en directo desde jw.org.</div>
+  <div class="sub">JW Broadcasting y otras publicaciones con vídeo en lenguas de signos, varias a la vez. Vídeo en directo desde jw.org.</div>
 </header>
 <div class="controls">
   <button class="primary" id="playAll">▶ Reproducir todos</button>
   <button id="pauseAll">⏸ Pausar todos</button>
   <button id="syncAll">⟳ Sincronizar</button>
+  <span class="counter" id="counter"></span>
   <span style="flex:1"></span>
-  <select id="langPicker"><option value="">Añadir lengua…</option></select>
+  <div class="addwrap">
+    <button id="addBtn">＋ Añadir lengua…</button>
+    <div id="addPanel" hidden>
+      <input id="addSearch" type="search" placeholder="Buscar lengua (nombre o código)…" autocomplete="off">
+      <div id="addList"></div>
+    </div>
+  </div>
+</div>
+<div class="globrow">
+  <span>Para todas:</span>
+  <select id="globColl" title="Colección para todas las lenguas"></select>
+  <select id="globProg" title="Programa para todas las lenguas"></select>
+  <button id="globApply">Aplicar a todas</button>
 </div>
 <div id="grid"></div>
-<footer>Vídeos servidos directamente desde los servidores de jw.org (API pública y CDN). Herramienta personal, sin afiliación ni respaldo oficial.</footer>
+<footer>Vídeos servidos directamente desde los servidores de jw.org (API pública y CDN). Herramienta personal, sin afiliación ni respaldo oficial. Máximo 16 lenguas simultáneas por rendimiento del navegador.</footer>
 <script>
 'use strict';
 const API = 'https://data.jw-api.org/mediator/v1';
+const MAX_TILES = 16; // límite de vídeos simultáneos; más degrada el navegador
 const DEFAULT_LANGS = [
   { code:'LSE', label:'Española (LSE)' },
   { code:'ASL', label:'Americana (ASL)' },
@@ -57,18 +82,45 @@ const DEFAULT_LANGS = [
   { code:'ISL', label:'Italiana (ISL)' },
   { code:'DGS', label:'Alemana (DGS)' },
 ];
-const LS_KEY = 'jwSignMosaic.langs.v1';
+const LS_KEY = 'jwSignMosaic.v2';
+const COLLECTIONS = [
+  ['StudioMonthlyPrograms', 'JW Broadcasting'],
+  ['VODStudio', 'JW Broadcasting (archivo)'],
+  ['VODProgramsEvents', 'Programas espirituales'],
+  ['VODMusicVideos', 'Música'],
+  ['VODSeries', 'Series'],
+  ['VODChildren', 'Niños'],
+  ['VODTeenagers', 'Jóvenes'],
+  ['VODFamily', 'Familia'],
+  ['VODMinistry', 'Reuniones y ministerio'],
+  ['VODOurActivities', 'Qué hacemos'],
+  ['VODOurOrganization', 'Nuestra organización'],
+  ['VODBible', 'La Biblia'],
+  ['VODMovies', 'Producciones audiovisuales'],
+  ['VODIntExp', 'Entrevistas y experiencias'],
+];
 const grid = document.getElementById('grid');
-const tiles = new Map(); // code -> {video, audioBtn}
+const tiles = new Map(); // code -> entry
+let ALL_SIGN_LANGS = [];
 
-function loadLangs() {
+function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
-    if (Array.isArray(saved) && saved.length) return saved;
+    if (saved && Array.isArray(saved.langs) && saved.langs.length) return saved;
   } catch (e) {}
-  return DEFAULT_LANGS.slice();
+  try { // migración desde v1
+    const old = JSON.parse(localStorage.getItem('jwSignMosaic.langs.v1') || 'null');
+    if (Array.isArray(old) && old.length) return { langs: old };
+  } catch (e) {}
+  return { langs: DEFAULT_LANGS.slice() };
 }
-function saveLangs(langs) { localStorage.setItem(LS_KEY, JSON.stringify(langs)); }
+function saveState() {
+  const langs = [...tiles.values()].map(t => ({ code: t.code, label: t.label, coll: t.coll, prog: t.prog }));
+  localStorage.setItem(LS_KEY, JSON.stringify({ langs }));
+}
+function updateCounter() {
+  document.getElementById('counter').textContent = tiles.size + ' / ' + MAX_TILES + ' lenguas';
+}
 
 async function fetchJSON(url) {
   const r = await fetch(url);
@@ -76,20 +128,30 @@ async function fetchJSON(url) {
   return r.json();
 }
 
-async function fetchPrograms(code) {
-  // JW Broadcasting monthly programs; fallbacks in case a language organizes differently.
-  const candidates = ['StudioMonthlyPrograms', 'VODStudio'];
-  for (const key of candidates) {
-    try {
-      const d = await fetchJSON(`${API}/categories/${code}/${key}?detailed=1&clientType=www`);
-      const cat = d.category || {};
-      if (cat.media && cat.media.length) return cat.media;
-      for (const sub of (cat.subcategories || [])) {
-        if (sub.media && sub.media.length) return sub.media;
+// Devuelve [{naturalKey,title,group}] aplanando un nivel de subcategorías.
+async function fetchCollection(code, collKey) {
+  const out = [];
+  try {
+    const d = await fetchJSON(`${API}/categories/${code}/${collKey}?detailed=1&clientType=www`);
+    const cat = d.category || {};
+    const own = (cat.media || []).filter(m => m.type === 'video');
+    for (const m of own) out.push({ naturalKey: m.naturalKey, title: m.title, group: '', media: m, agnostic: m.languageAgnosticNaturalKey });
+    for (const sub of (cat.subcategories || [])) {
+      const media = sub.media || [];
+      if (media.length) {
+        for (const m of media.filter(x => x.type === 'video')) out.push({ naturalKey: m.naturalKey, title: m.title, group: sub.name || sub.key, media: m, agnostic: m.languageAgnosticNaturalKey });
+      } else if (sub.key && sub.key !== collKey) {
+        try {
+          const sd = await fetchJSON(`${API}/categories/${code}/${sub.key}?detailed=1&clientType=www`);
+          const scat = sd.category || {};
+          for (const m of (scat.media || []).filter(x => x.type === 'video').slice(0, 100)) {
+            out.push({ naturalKey: m.naturalKey, title: m.title, group: sub.name || sub.key, media: m, agnostic: m.languageAgnosticNaturalKey });
+          }
+        } catch (e) { /* colección vacía para esta lengua */ }
       }
-    } catch (e) { /* try next */ }
-  }
-  return [];
+    }
+  } catch (e) { return []; }
+  return out;
 }
 
 function pickFile(media) {
@@ -105,6 +167,9 @@ function pickFile(media) {
   return preferred.url;
 }
 
+// naturalKey tipo "pub-jwb-142_LSE_1_VIDEO" -> "pub-jwb-142" (comparable entre lenguas)
+function normKey(it) { return (it && (it.agnostic || it.naturalKey)) ? String(it.agnostic || it.naturalKey).replace(/_[A-Z]{2,5}_\d+_VIDEO$/, '') : ''; }
+
 function allVideos() { return [...tiles.values()].map(t => t.video); }
 
 function muteOthers(except) {
@@ -115,8 +180,55 @@ function muteOthers(except) {
   }
 }
 
+async function loadTileProgram(entry, item) {
+  const { video, status } = entry;
+  entry.prog = item ? item.naturalKey : '';
+  if (!item) { status.textContent = 'Sin vídeos en esta colección.'; status.classList.add('err'); return; }
+  try {
+    const src = pickFile(item.media || {});
+    if (src) {
+      status.style.display = ''; status.classList.remove('err'); status.textContent = 'Cargando…';
+      video.src = src; video.play().catch(() => {});
+    } else { status.textContent = 'Sin MP4 compatible.'; status.classList.add('err'); }
+  } catch (e) { status.textContent = 'Error al cargar (' + e.message + ')'; status.classList.add('err'); }
+  saveState(); refreshGlobalPicker();
+}
+
+async function fillPrograms(entry, keepProg) {
+  const { code, sel } = entry;
+  sel.innerHTML = '';
+  const items = await fetchCollection(code, entry.coll);
+  entry.items = items;
+  const groups = new Map();
+  for (const it of items.slice(0, 200)) {
+    if (!groups.has(it.group)) groups.set(it.group, []);
+    groups.get(it.group).push(it);
+  }
+  for (const [g, arr] of groups) {
+    const parent = g ? (() => { const og = document.createElement('optgroup'); og.label = g; sel.appendChild(og); return og; })() : sel;
+    for (const it of arr) {
+      const o = document.createElement('option');
+      o.value = it.naturalKey;
+      o.textContent = it.title;
+      parent.appendChild(o);
+    }
+  }
+  let idx = 0;
+  if (keepProg) {
+    const nk = normKey({ naturalKey: keepProg });
+    const found = items.findIndex(it => it.naturalKey === keepProg || (nk && normKey(it) === nk));
+    if (found >= 0) idx = found;
+  }
+  sel.selectedIndex = idx;
+  await loadTileProgram(entry, items[idx]);
+}
+
 async function addTile(lang) {
   if (tiles.has(lang.code)) return;
+  if (tiles.size >= MAX_TILES) {
+    alert('Máximo ' + MAX_TILES + ' lenguas simultáneas. Quita alguna para añadir otra.');
+    return;
+  }
   const tile = document.createElement('div');
   tile.className = 'tile';
   tile.innerHTML = `
@@ -126,35 +238,23 @@ async function addTile(lang) {
       <button class="fs" title="Pantalla completa">⛶</button>
       <button class="rm" title="Quitar">✕</button>
     </div>
-    <select class="programs" hidden></select>
+    <select class="colls" style="margin:0 8px 4px;font-size:12px;max-width:calc(100% - 16px)"></select>
+    <select class="programs" style="margin:0 8px 6px;font-size:12px;max-width:calc(100% - 16px)"></select>
     <div class="videowrap"></div>
     <div class="status">Cargando…</div>`;
   grid.appendChild(tile);
   tile.querySelector('.lang').textContent = lang.label;
   const status = tile.querySelector('.status');
+  const selColl = tile.querySelector('.colls');
   const sel = tile.querySelector('.programs');
   const wrap = tile.querySelector('.videowrap');
 
-  let media;
-  try {
-    media = await fetchPrograms(lang.code);
-  } catch (e) {
-    status.textContent = 'Error al cargar (' + e.message + ')';
-    status.classList.add('err');
-    return;
-  }
-  if (!media.length) {
-    status.textContent = 'Esta lengua no tiene vídeos web disponibles.';
-    status.classList.add('err');
-    return;
+  for (const [key, name] of COLLECTIONS) {
+    const o = document.createElement('option'); o.value = key; o.textContent = name; selColl.appendChild(o);
   }
 
   const video = document.createElement('video');
-  video.muted = true;
-  video.autoplay = true;
-  video.playsInline = true;
-  video.controls = true;
-  video.preload = 'metadata';
+  video.muted = true; video.autoplay = true; video.playsInline = true; video.controls = true; video.preload = 'metadata';
   wrap.appendChild(video);
   video.addEventListener('playing', () => { status.style.display = 'none'; });
   let retried = false;
@@ -170,24 +270,17 @@ async function addTile(lang) {
     }
   });
 
-  const entry = { video, audioBtn: tile.querySelector('.audio'), tile };
+  const entry = { code: lang.code, label: lang.label, coll: lang.coll || 'StudioMonthlyPrograms', prog: lang.prog || '',
+                  video, audioBtn: tile.querySelector('.audio'), tile, sel, selColl, status, items: [] };
   tiles.set(lang.code, entry);
+  selColl.value = entry.coll;
+  updateCounter(); saveState(); refreshGlobalPicker();
 
-  for (const m of media.slice(0, 24)) {
-    const o = document.createElement('option');
-    o.value = m.naturalKey || m.title;
-    o.textContent = m.title;
-    sel.appendChild(o);
-  }
-  sel.hidden = media.length < 2;
-  function load(idx) {
-    const src = pickFile(media[idx]);
-    if (src) { status.style.display = ''; status.textContent = 'Cargando…'; video.src = src; video.play().catch(() => {}); }
-    else { status.textContent = 'Sin MP4 compatible.'; status.classList.add('err'); }
-  }
-  sel.addEventListener('change', () => load(sel.selectedIndex));
-  load(0);
-
+  selColl.addEventListener('change', async () => { entry.coll = selColl.value; entry.prog = ''; await fillPrograms(entry, ''); });
+  sel.addEventListener('change', async () => {
+    const it = entry.items.find(x => x.naturalKey === sel.value);
+    await loadTileProgram(entry, it);
+  });
   entry.audioBtn.addEventListener('click', () => muteOthers(entry));
   tile.querySelector('.fs').addEventListener('click', () => {
     if (document.fullscreenElement) document.exitFullscreen();
@@ -196,10 +289,76 @@ async function addTile(lang) {
   tile.querySelector('.rm').addEventListener('click', () => {
     video.pause(); video.removeAttribute('src'); video.load();
     tiles.delete(lang.code); tile.remove();
-    const langs = loadLangs().filter(l => l.code !== lang.code);
-    saveLangs(langs);
+    updateCounter(); saveState(); refreshGlobalPicker(); renderAddList();
   });
+
+  await fillPrograms(entry, entry.prog);
 }
+
+// Selector global: colección + programa aplicables a todas las lenguas
+function refreshGlobalPicker() {
+  const gc = document.getElementById('globColl');
+  const gp = document.getElementById('globProg');
+  const prevColl = gc.value, prevProg = gp.value;
+  gc.innerHTML = ''; gp.innerHTML = '';
+  for (const [key, name] of COLLECTIONS) { const o = document.createElement('option'); o.value = key; o.textContent = name; gc.appendChild(o); }
+  const first = [...tiles.values()].find(t => t.items && t.items.length);
+  if (first) {
+    gc.value = first.coll;
+    for (const it of first.items.slice(0, 120)) { const o = document.createElement('option'); o.value = normKey(it); o.textContent = it.title; gp.appendChild(o); }
+  }
+  if (prevColl && [...gc.options].some(o => o.value === prevColl)) gc.value = prevColl;
+  if (prevProg && [...gp.options].some(o => o.value === prevProg)) gp.value = prevProg;
+}
+document.getElementById('globApply').addEventListener('click', async () => {
+  const coll = document.getElementById('globColl').value;
+  const nk = document.getElementById('globProg').value;
+  for (const t of tiles.values()) {
+    t.selColl.value = coll;
+    if (t.coll !== coll) { t.coll = coll; t.prog = ''; await fillPrograms(t, ''); }
+    if (nk) {
+      const it = t.items.find(x => normKey(x) === nk);
+      if (it) { t.sel.value = it.naturalKey; await loadTileProgram(t, it); }
+    }
+  }
+});
+
+// Catálogo completo de lenguas de signos con buscador
+async function loadCatalog() {
+  try {
+    const d = await fetchJSON(`${API}/languages/E/web?clientType=www`);
+    ALL_SIGN_LANGS = (d.languages || []).filter(l => l.isSignLanguage).sort((a, b) => a.name.localeCompare(b.name));
+  } catch (e) { ALL_SIGN_LANGS = []; }
+  renderAddList();
+}
+function renderAddList() {
+  const list = document.getElementById('addList');
+  const q = (document.getElementById('addSearch').value || '').toLowerCase();
+  list.innerHTML = '';
+  const shown = ALL_SIGN_LANGS.filter(l => !q || l.name.toLowerCase().includes(q) || l.code.toLowerCase().includes(q) || (l.vernacular || '').toLowerCase().includes(q));
+  if (!shown.length) { list.innerHTML = '<div style="padding:8px 10px;color:var(--muted);font-size:13px">Sin resultados.</div>'; return; }
+  for (const l of shown) {
+    const b = document.createElement('button');
+    const added = tiles.has(l.code);
+    b.textContent = l.name + ' (' + l.code + ')' + (added ? ' ✓' : '');
+    b.disabled = added;
+    if (added) b.classList.add('added');
+    b.addEventListener('click', async () => {
+      await addTile({ code: l.code, label: l.name + ' (' + l.code + ')' });
+      renderAddList();
+    });
+    list.appendChild(b);
+  }
+}
+document.getElementById('addBtn').addEventListener('click', () => {
+  const p = document.getElementById('addPanel');
+  p.hidden = !p.hidden;
+  if (!p.hidden) { document.getElementById('addSearch').value = ''; renderAddList(); document.getElementById('addSearch').focus(); }
+});
+document.getElementById('addSearch').addEventListener('input', renderAddList);
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.addwrap')) document.getElementById('addPanel').hidden = true;
+});
 
 document.getElementById('playAll').addEventListener('click', () => allVideos().forEach(v => v.play().catch(() => {})));
 document.getElementById('pauseAll').addEventListener('click', () => allVideos().forEach(v => v.pause()));
@@ -210,36 +369,10 @@ document.getElementById('syncAll').addEventListener('click', () => {
   vs.forEach(v => { v.currentTime = t; v.play().catch(() => {}); });
 });
 
-async function fillLangPicker() {
-  try {
-    const d = await fetchJSON(`${API}/languages/E/web?clientType=www`);
-    const signs = (d.languages || []).filter(l => /sign/i.test(l.name)).sort((a, b) => a.name.localeCompare(b.name));
-    const picker = document.getElementById('langPicker');
-    for (const l of signs) {
-      const o = document.createElement('option');
-      o.value = l.code;
-      o.textContent = l.name + ' (' + l.code + ')';
-      picker.appendChild(o);
-    }
-    picker.addEventListener('change', async () => {
-      const code = picker.value;
-      if (!code) return;
-      const l = signs.find(x => x.code === code);
-      const langs = loadLangs();
-      if (!langs.some(x => x.code === code)) {
-        const entry = { code, label: (l ? l.name : code) + ' (' + code + ')' };
-        langs.push(entry); saveLangs(langs);
-        await addTile(entry);
-      }
-      picker.value = '';
-    });
-  } catch (e) { /* picker stays with default option only */ }
-}
-
 (async function init() {
-  const langs = loadLangs();
-  fillLangPicker();
-  for (const l of langs) addTile(l);
+  const state = loadState();
+  loadCatalog();
+  for (const l of state.langs.slice(0, MAX_TILES)) await addTile(l);
 })();
 </script>
 </body>
