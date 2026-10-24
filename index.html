@@ -340,6 +340,21 @@ async function addTile(lang) {
   await fillPrograms(entry, entry.prog);
 }
 
+let globProgReq = 0;
+async function refreshGlobalPrograms(keepProg) {
+  const req = ++globProgReq;
+  const gc = document.getElementById('globColl');
+  const gp = document.getElementById('globProg');
+  const first = [...tiles.values()][0];
+  gp.innerHTML = '';
+  if (!first || !gc.value) return;
+  const items = (first.coll === gc.value && first.items && first.items.length) ? first.items : await fetchCollection(first.code, gc.value);
+  if (req !== globProgReq) return; // respuesta vieja: el usuario ya volvio a cambiar
+  for (const it of items.slice(0, 120)) { const o = document.createElement('option'); o.value = normKey(it); o.textContent = it.title; gp.appendChild(o); }
+  let idx = 0;
+  if (keepProg) { const k = items.findIndex(it => normKey(it) === keepProg); if (k >= 0) idx = k; }
+  gp.selectedIndex = idx;
+}
 function refreshGlobalPicker(force) {
   const gc = document.getElementById('globColl');
   const gp = document.getElementById('globProg');
@@ -349,15 +364,14 @@ function refreshGlobalPicker(force) {
   if (!force && fp === refreshGlobalPicker._fp && gp.options.length) return; // nada nuevo
   refreshGlobalPicker._fp = fp;
   const prevColl = gc.value, prevProg = gp.value;
-  gc.innerHTML = ''; gp.innerHTML = '';
+  gc.innerHTML = '';
   for (const [key, name] of collectionsFor()) { const o = document.createElement('option'); o.value = key; o.textContent = name; gc.appendChild(o); }
-  if (first) {
-    gc.value = first.coll;
-    for (const it of first.items.slice(0, 120)) { const o = document.createElement('option'); o.value = normKey(it); o.textContent = it.title; gp.appendChild(o); }
-  }
   if (prevColl && [...gc.options].some(o => o.value === prevColl)) gc.value = prevColl;
-  if (prevProg && [...gp.options].some(o => o.value === prevProg)) gp.value = prevProg;
+  else if (first) gc.value = first.coll;
+  // el selector de programas siempre sigue a la categoria elegida
+  refreshGlobalPrograms(gc.value === prevColl ? prevProg : '');
 }
+document.getElementById('globColl').addEventListener('change', () => refreshGlobalPrograms(''));
 document.getElementById('globApply').addEventListener('click', async () => {
   const coll = document.getElementById('globColl').value;
   const nk = document.getElementById('globProg').value;
