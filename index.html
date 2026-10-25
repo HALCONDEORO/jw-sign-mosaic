@@ -38,7 +38,9 @@
   .addwrap { position:relative; }
   #addPanel { position:absolute; right:0; top:calc(100% + 4px); width:320px; max-height:320px; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.5); z-index:20; }
   #addPanel[hidden] { display:none; }
-  @media (max-width:600px) { #addPanel { left:0; right:auto; width:min(320px, calc(100vw - 36px)); box-sizing:border-box; } }
+  .controls { position:relative; }
+  .addwrap { position:static; }
+  #addPanel { right:18px; width:min(320px, calc(100% - 36px)); }
   #addSearch { margin:8px; }
   #addList { overflow-y:auto; }
   #addList button { display:block; width:100%; text-align:left; border:0; border-radius:0; background:none; padding:7px 10px; font-size:13px; }
@@ -608,4 +610,4 @@ setInterval(() => {
 })();
 </script>
 </body>
-  </html>
+</html>
