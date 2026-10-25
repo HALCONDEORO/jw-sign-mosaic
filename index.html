@@ -19,7 +19,7 @@
   .langswitch { flex-shrink:0; }
   .langswitch button { padding:4px 9px; font-size:13px; }
   .langswitch button.active { background:#1f6feb; border-color:#1f6feb; color:#fff; font-weight:600; }
-  #grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:10px; padding:12px; }
+  #grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:10px; padding:12px; }
   .tile { background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden; display:flex; flex-direction:column; }
   .tile:fullscreen { border-radius:0; }
   .tile:fullscreen video { flex:1; height:auto; }
@@ -62,7 +62,10 @@
   <button class="primary" id="playAll">▶</button>
   <button id="pauseAll">⏸</button>
   <button id="syncAll">⟳</button>
-  <span class="counter" id="counter"></span>
+  <span class="counter" id="counter" aria-live="polite"></span>
+  <button id="addAll"></button>
+  <button id="stopAdd" hidden></button>
+  <span id="addProgress" role="status"></span>
   <span style="flex:1"></span>
   <div class="addwrap">
     <button id="addBtn">＋</button>
@@ -78,12 +81,15 @@
   <select id="globProg"></select>
   <button id="globApply"></button>
 </div>
+<p id="capacityNote" style="margin:10px 18px;color:var(--muted);font-size:13px"></p>
 <div id="grid"></div>
 <footer id="tFooter"></footer>
 <script>
 'use strict';
 const API = 'https://data.jw-api.org/mediator/v1';
-const MAX_TILES = 16; // límite de vídeos simultáneos / simultaneous video limit
+// No fixed tile limit. Device capacity, media availability and bandwidth still apply.
+let addingAll = false;
+let stopAddingAll = false;
 const I18N = {
   es: {
     title: 'Mosaico de Lenguas de Signos', htmlLang: 'es',
@@ -91,7 +97,7 @@ const I18N = {
     playAll: '▶ Reproducir todos', pauseAll: '⏸ Pausar todos', syncAll: '⟳ Sincronizar',
     addBtn: '＋ Añadir lengua…', searchPh: 'Buscar lengua (nombre o código)…', noResults: 'Sin resultados.',
     forAll: 'Para todas:', applyAll: 'Aplicar a todas',
-    counter: n => n + ' / ' + MAX_TILES + ' lenguas',
+    counter: n => n + ' lenguas seleccionadas',
     loading: 'Cargando…', retrying: 'Reintentando…',
     slowMsg: 'Sigue sin cargar. Toca aquí para reintentar.',
     noEquiv: 'Esta publicación no está disponible en esta lengua.',
@@ -99,9 +105,15 @@ const I18N = {
     failMsg: 'No se pudo cargar el vídeo. Pulsa Reproducir todos para reintentar.',
     noVideoPub: 'Sin vídeo de esta publicación en esta lengua.',
     noMp4: 'Sin MP4 compatible.',
-    maxAlert: 'Máximo ' + MAX_TILES + ' lenguas simultáneas. Quita alguna para añadir otra.',
+    addAll: 'Añadir todas las lenguas del catálogo…', stopAdd: 'Detener adición',
+    confirmAll: n => 'Añadir ' + n + ' lenguas de signos más, una a una, manteniendo la publicación actual. No todas tendrán este vídeo. Muchas reproducciones pueden agotar la memoria, la batería o los datos. No se garantiza que tu dispositivo pueda reproducirlas todas. ¿Continuar?',
+    adding: (n, total) => 'Añadiendo ' + n + ' de ' + total + '…',
+    emptyCatalog: 'Catálogo no disponible. Puedes conservar tus lenguas guardadas e intentarlo más tarde.',
+    allAdded: 'Todas las lenguas del catálogo ya están añadidas.',
+    addedSummary: (n, stopped) => (stopped ? 'Adición detenida. ' : 'Adición terminada. ') + n + ' lenguas añadidas.',
+    capacity: 'Empieza con las ocho habituales y añade más. Sin límite fijo; la capacidad real depende de tu dispositivo y de la conexión.',
     audioTip: 'Escuchar esta lengua', fsTip: 'Pantalla completa', rmTip: 'Quitar',
-    footer: 'Vídeos servidos directamente desde los servidores de jw.org (API pública y CDN). Herramienta personal, sin afiliación ni respaldo oficial. Máximo 16 lenguas simultáneas por rendimiento del navegador.'
+    footer: 'Vídeos servidos directamente desde los servidores de jw.org (API pública y CDN). Herramienta personal, sin afiliación ni respaldo oficial. La reproducción simultánea depende de la disponibilidad del vídeo y de tu dispositivo.'
   },
   en: {
     title: 'Sign Language Mosaic', htmlLang: 'en',
@@ -109,7 +121,7 @@ const I18N = {
     playAll: '▶ Play all', pauseAll: '⏸ Pause all', syncAll: '⟳ Sync',
     addBtn: '＋ Add language…', searchPh: 'Search language (name or code)…', noResults: 'No results.',
     forAll: 'For all:', applyAll: 'Apply to all',
-    counter: n => n + ' / ' + MAX_TILES + ' languages',
+    counter: n => n + ' languages selected',
     loading: 'Loading…', retrying: 'Retrying…',
     slowMsg: 'Still not loading. Tap here to retry.',
     noEquiv: 'This publication is not available in this language.',
@@ -117,9 +129,15 @@ const I18N = {
     failMsg: 'The video failed to load. Press Play all to retry.',
     noVideoPub: 'No video of this publication in this language.',
     noMp4: 'No compatible MP4.',
-    maxAlert: 'Maximum ' + MAX_TILES + ' simultaneous languages. Remove one to add another.',
+    addAll: 'Add all catalogue languages…', stopAdd: 'Stop adding',
+    confirmAll: n => 'Add ' + n + ' more sign languages, one at a time, keeping the current publication. This video may not exist in every language. Many streams may exhaust memory, battery or data. Your device is not guaranteed to play them all. Continue?',
+    adding: (n, total) => 'Adding ' + n + ' of ' + total + '…',
+    emptyCatalog: 'Catalogue unavailable. Keep your saved languages and try again later.',
+    allAdded: 'All catalogue languages have already been added.',
+    addedSummary: (n, stopped) => (stopped ? 'Stopped adding. ' : 'Finished adding. ') + n + ' languages added.',
+    capacity: 'Start with the usual eight and add more. No fixed limit; actual capacity depends on your device and connection.',
     audioTip: 'Listen to this language', fsTip: 'Fullscreen', rmTip: 'Remove',
-    footer: 'Videos served directly from jw.org servers (public API and CDN). Personal tool, not affiliated or endorsed. Maximum 16 simultaneous languages for browser performance.'
+    footer: 'Videos served directly from jw.org servers (public API and CDN). Personal tool, not affiliated or endorsed. Simultaneous playback depends on video availability and your device.'
   }
 };
 let LANG = (localStorage.getItem('jwSignMosaic.lang') || (navigator.language || 'es')).toLowerCase().startsWith('en') ? 'en' : 'es';
@@ -289,7 +307,6 @@ async function fillPrograms(entry, keepProg, strict) {
 
 async function addTile(lang) {
   if (tiles.has(lang.code)) return;
-  if (tiles.size >= MAX_TILES) { alert(t('maxAlert')); return; }
   const tile = document.createElement('div');
   tile.className = 'tile';
   tile.innerHTML = `
@@ -382,7 +399,7 @@ async function addTile(lang) {
       inheritProg = refIt ? refIt.naturalKey : '';
     }
   }
-  await fillPrograms(entry, entry.prog || inheritProg, !!inheritProg);
+  await fillPrograms(entry, entry.prog || inheritProg, !!inheritProg || !!lang.strictPublication);
 }
 
 let globProgReq = 0;
@@ -463,6 +480,58 @@ document.getElementById('addBtn').addEventListener('click', () => {
   if (!p.hidden) { document.getElementById('addSearch').value = ''; renderAddList(); document.getElementById('addSearch').focus(); }
 });
 document.getElementById('addSearch').addEventListener('input', renderAddList);
+
+function validLanguageCode(code) {
+  return typeof code === 'string' && /^[A-Z][A-Z0-9]{0,19}$/.test(code);
+}
+function restoredLanguages(langs, catalog) {
+  const seen = new Set();
+  return (Array.isArray(langs) ? langs : []).filter(l => {
+    if (!l || !validLanguageCode(l.code) || seen.has(l.code)) return false;
+    if (catalog.length && !catalog.some(x => x.code === l.code && x.isSignLanguage)) return false;
+    seen.add(l.code); return true;
+  });
+}
+function remainingLanguages(catalog, selected) {
+  const seen = new Set(selected);
+  return catalog.filter(l => {
+    if (!l || !validLanguageCode(l.code) || !l.isSignLanguage || seen.has(l.code)) return false;
+    seen.add(l.code); return true;
+  });
+}
+async function addCatalogLanguages() {
+  if (addingAll) return;
+  const progress = document.getElementById('addProgress');
+  if (!ALL_SIGN_LANGS.length) { progress.textContent = t('emptyCatalog'); return; }
+  const pending = remainingLanguages(ALL_SIGN_LANGS, tiles.keys());
+  if (!pending.length) { progress.textContent = t('allAdded'); return; }
+  if (!confirm(t('confirmAll')(pending.length))) return;
+  addingAll = true; stopAddingAll = false;
+  const button = document.getElementById('addAll');
+  const stop = document.getElementById('stopAdd');
+  let addedCount = 0;
+  button.disabled = true; stop.hidden = false;
+  const reference = [...tiles.values()].find(x => x.prog && x.items.length);
+  const publication = reference ? {coll:reference.coll, prog:reference.prog} : {};
+  try {
+    for (let i = 0; i < pending.length; i++) {
+      if (stopAddingAll) break;
+      progress.textContent = t('adding')(i + 1, pending.length);
+      // Snapshot the selected publication once; do not silently fall back for unavailable translations.
+      const before = tiles.size;
+      await addTile({...pending[i], ...publication, strictPublication: !!publication.prog});
+      if (tiles.size > before) addedCount++;
+      renderAddList();
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
+  } finally {
+    addingAll = false; button.disabled = false; stop.hidden = true;
+    progress.textContent = t('addedSummary')(addedCount, stopAddingAll); renderAddList();
+  }
+}
+document.getElementById('addAll').addEventListener('click', addCatalogLanguages);
+document.getElementById('stopAdd').addEventListener('click', () => { stopAddingAll = true; });
+
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.addwrap')) document.getElementById('addPanel').hidden = true;
 });
@@ -480,6 +549,9 @@ function applyI18n() {
   document.getElementById('tForAll').textContent = t('forAll');
   document.getElementById('globApply').textContent = t('applyAll');
   document.getElementById('tFooter').textContent = t('footer');
+  document.getElementById('addAll').textContent = t('addAll');
+  document.getElementById('stopAdd').textContent = t('stopAdd');
+  document.getElementById('capacityNote').textContent = t('capacity');
   document.getElementById('langES').classList.toggle('active', LANG === 'es');
   document.getElementById('langEN').classList.toggle('active', LANG === 'en');
   updateCounter();
@@ -528,7 +600,7 @@ setInterval(() => {
   applyI18n();
   await loadCatalog();
   const state = loadState();
-  for (const l of state.langs.slice(0, MAX_TILES)) {
+  for (const l of restoredLanguages(state.langs, ALL_SIGN_LANGS)) {
     await addTile({ ...l, label: l.label || labelFor(l.code) });
     await new Promise(r => setTimeout(r, 400)); // escalonar: no ahogar la red con N vídeos a la vez
   }
