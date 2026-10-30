@@ -454,7 +454,7 @@ test('static: no autoplay, no play() outside startTogether and the intent-gated 
   assert.match(script,/video\.autoplay = false/);
   const plays=[...script.matchAll(/\.play\(\)/g)].length;
   assert.equal(plays,3,'startTogether, autoResume, and the verse loop restarting a tile that was already playing');
-  assert.match(script,/video\.addEventListener\('ended', \(\) => \{ if \(entry\.loop/,'the third play() is only the verse-loop wrap on ended');
+  assert.match(grab(/function onVerseEnded[\s\S]*?\n}\n/),/!x\.shouldPlay/,'the third play() is only the verse-loop restart, gated on shouldPlay');
   assert.match(grab(/function autoResume\(\) \{[\s\S]*?\n}/),/x\.shouldPlay && x\.video\.src/);
   assert.match(script,/video\.addEventListener\('loadeddata', loaded\)/,'a loaded paused tile does not stay on "Loading…"');
 });
@@ -573,7 +573,7 @@ function fillWorld(chapter){
     document:{createElement:()=>opt()},
     setStatus:(e,k,a,err)=>{(k==='loading'?side:log).push(k==='loading'?'loading':['status',k,!!err])},
     markUnavailable:(e,k)=>log.push(['unavailable',k]),
-    loadTileProgram:async(e,it)=>log.push(['load',it.naturalKey,it.startAt,it.verseNote,it.bibleSrc]),
+    loadTileProgram:async(e,it)=>log.push(['load',it.naturalKey,it.startAt,!!it.verseNote,it.bibleSrc]),
     __ch:chapter});
   vm.runInContext('fetchBibleChapter = async () => __ch;',c);
   vm.runInContext(grab(/function verseEnd\([\s\S]*?\n}\n/),c);
@@ -582,12 +582,14 @@ function fillWorld(chapter){
   c.tiles.set('LSE',entry);
   return {c,entry,log,side};
 }
-test('Bible tile: loads exactly the requested chapter at its verse; no verse = chapter start; missing marker = start + note',async()=>{
+test('Bible tile: loads exactly the requested chapter at its verse; no verse = chapter start; missing verse marker = unavailable cell',async()=>{
   const ok={state:'ok',src:'https://cdn/a_r240P.mp4',verses:new Map([[16,197.6]])};
   let w=fillWorld(ok);await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_16');
   assert.deepEqual(w.log,[['load','bible_43_3_16',197.6,false,'https://cdn/a_r240P.mp4']]);
   w=fillWorld(ok);await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3');assert.deepEqual(w.log,[['load','bible_43_3',0,false,'https://cdn/a_r240P.mp4']]);
-  w=fillWorld(ok);await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_99');assert.deepEqual(w.log,[['load','bible_43_3_99',0,true,'https://cdn/a_r240P.mp4']]);
+  w=fillWorld(ok);await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_99');assert.deepEqual(w.log,[['unavailable','bible_43_3_99']],'no marker for the verse: black cell, the chapter is not loaded from its start');
+  w=fillWorld({state:'ok',src:'https://cdn/a_r240P.mp4',verses:new Map()});await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3');assert.deepEqual(w.log,[['load','bible_43_3',0,false,'https://cdn/a_r240P.mp4']],'whole chapter is unchanged even without markers');
+  w=fillWorld({state:'ok',src:'https://cdn/a_r240P.mp4',verses:new Map([[16,197.6],[17,210]])});await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_17');assert.equal(w.log[0][0],'load');
 });
 test('Bible tile: language without the chapter is a black unavailable cell, never another passage; a failed request is retriable',async()=>{
   let w=fillWorld({state:'none'});await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_16');
@@ -676,21 +678,63 @@ test('verseEnd: next marker after the verse, none for the last verse',()=>{
   assert.equal(vm.runInContext('verseEnd(m,10)',c),25.5);assert.equal(vm.runInContext('verseEnd(m,0)',c),10);
   assert.equal(vm.runInContext('verseEnd(m,25.5)',c),undefined);
 });
-test('loopVerse wraps at the end of the verse, only while playing and only on a natural crossing',()=>{
-  const c=vm.createContext({Number});vm.runInContext(grab(/function loopVerse\([\s\S]*?\n}\n/),c);
-  const mk=(o)=>Object.assign({loop:true,startAt:10,endAt:25,video:{paused:false,ended:false,currentTime:24}},o);
-  const run=(x)=>{c.x=x;return vm.runInContext('loopVerse(x)',c)};
-  let x=mk();assert.equal(run(x),false);assert.equal(x.video.currentTime,24);
-  x=mk();x.video.currentTime=25.05;assert.equal(run(x),true);assert.equal(x.video.currentTime,10);
-  x=mk();x.video.currentTime=25.05;x.video.paused=true;assert.equal(run(x),false);assert.equal(x.video.currentTime,25.05);
-  x=mk({loop:false});x.video.currentTime=26;assert.equal(run(x),false);
-  x=mk();x.video.currentTime=60;assert.equal(run(x),false);assert.equal(x.video.currentTime,60);
-  x=mk({endAt:undefined});x.video.currentTime=60;assert.equal(run(x),false);
+function loopCtx(){
+  const c=vm.createContext({Number,Promise,syncing:false,userPaused:false,tiles:new Map()});
+  vm.runInContext([grab(/function loopVerse\([\s\S]*?\n}\n/),grab(/function onVerseSeek\([^\n]*/),grab(/function onVerseEnded\([\s\S]*?\n}\n/)].join('\n'),c);
+  return c;
+}
+function loopTile(o){
+  const v={paused:false,ended:false,seeking:false,currentTime:10,src:'https://cdn/x.mp4',error:null,plays:0,play(){this.plays++;this.paused=false;return Promise.resolve()}};
+  const x=Object.assign({code:'ASL',loop:true,startAt:10,endAt:25,shouldPlay:true,loopSrc:'https://cdn/x.mp4',tile:{classList:{contains:()=>false}},video:v},o);
+  return x;
+}
+test('loopVerse wraps on a real crossing of endAt, even after a long throttled gap',()=>{
+  const c=loopCtx(),run=x=>{c.x=x;return vm.runInContext('loopVerse(x)',c)};
+  const x=loopTile();
+  for(const t of [10,15,24.9]){x.video.currentTime=t;assert.equal(run(x),false);}
+  x.video.currentTime=25.04;assert.equal(run(x),true);assert.equal(x.video.currentTime,10);
+  const y=loopTile();y.video.currentTime=20;run(y);y.video.currentTime=40;assert.equal(run(y),true,'tab throttled for several seconds: crossing still detected');assert.equal(y.video.currentTime,10);
 });
-test('verse loop wiring: chosen verse sets loop, whole chapter and other videos do not; ended wraps the last verse',()=>{
+test('loopVerse: manual seek to or past the end never rewinds; seeking back inside the verse keeps looping',()=>{
+  const c=loopCtx(),run=x=>{c.x=x;return vm.runInContext('loopVerse(x)',c)},seek=x=>{c.x=x;vm.runInContext('onVerseSeek(x)',c)};
+  const x=loopTile();x.video.currentTime=15;run(x);
+  x.video.currentTime=25.05;seek(x);assert.equal(run(x),false);assert.equal(x.video.currentTime,25.05,'seek to endAt+0.05 while playing');
+  x.video.currentTime=60;seek(x);assert.equal(run(x),false);assert.equal(x.video.currentTime,60);
+  x.video.currentTime=12;seek(x);run(x);x.video.currentTime=25.2;assert.equal(run(x),true);assert.equal(x.video.currentTime,10);
+  const y=loopTile();y.video.currentTime=24;run(y);y.video.currentTime=25.1;y.video.seeking=true;assert.equal(run(y),false,'mid-seek sample ignored');
+});
+test('loopVerse does nothing when paused, without loop, without an end marker, or with no previous sample',()=>{
+  const c=loopCtx(),run=x=>{c.x=x;return vm.runInContext('loopVerse(x)',c)};
+  for(const o of [{video:Object.assign(loopTile().video,{paused:true})},{loop:false},{endAt:undefined}]){
+    const x=loopTile(o);x.video.currentTime=24;run(x);x.video.currentTime=26;assert.equal(run(x),false);assert.equal(x.video.currentTime,26);
+  }
+  const z=loopTile();z.video.currentTime=15;run(z);z.video.currentTime=30;c.syncing=true;assert.equal(run(z),false,'no wrap while syncing');c.syncing=false;
+  const w=loopTile({loopSrc:'https://cdn/old.mp4'});w.video.currentTime=15;run(w);w.video.currentTime=30;assert.equal(run(w),false,'source changed');
+  const x=loopTile();x.video.currentTime=26;assert.equal(run(x),false,'first sample after a (re)load is not a crossing');
+});
+test('onVerseEnded: restarts only a tile Play all started; paused, stopped or non-loop tiles stay put',()=>{
+  const c=loopCtx(),end=x=>{c.x=x;c.tiles=new Map([['ASL',x]]);return vm.runInContext('onVerseEnded(x)',c)};
+  let x=loopTile();x.video.paused=true;x.video.ended=true;x.video.currentTime=99;
+  assert.equal(end(x),true);assert.equal(x.video.plays,1);assert.equal(x.video.currentTime,10);
+  x=loopTile({shouldPlay:false});x.video.paused=true;x.video.ended=true;x.video.currentTime=99;
+  assert.equal(end(x),false);assert.equal(x.video.plays,0,'paused by the user (shouldPlay false): no play()');assert.equal(x.video.currentTime,99);
+  x=loopTile({loop:false});x.video.currentTime=99;assert.equal(end(x),false);assert.equal(x.video.plays,0);
+  x=loopTile();x.video.src='';assert.equal(end(x),false);assert.equal(x.video.plays,0);
+  const none=(label,f)=>{const t=loopTile();t.video.paused=true;t.video.ended=true;t.video.currentTime=99;c.userPaused=false;c.syncing=false;f(t);assert.equal(end(t),false,label);assert.equal(t.video.plays,0,label);assert.equal(t.video.currentTime,99,label);c.userPaused=false;c.syncing=false;};
+  none('Pause all',t=>{c.userPaused=true;});
+  none('syncing',t=>{c.syncing=true;});
+  none('source changed',t=>{t.video.src='https://cdn/other.mp4';});
+  none('load error',t=>{t.video.error={code:2};});
+  none('shown as unavailable',t=>{t.tile={classList:{contains:k=>k==='novideo'}};});
+  x=loopTile();x.video.paused=true;x.video.ended=true;c.tiles=new Map([['ASL',loopTile()]]);c.x=x;assert.equal(vm.runInContext('onVerseEnded(x)',c),false,'stale entry (tile removed or replaced)');assert.equal(x.video.plays,0);
+});
+test('verse loop wiring: events call the handlers, chosen verse sets loop, a new source resets it, Pause all clears shouldPlay',()=>{
+  assert.match(script,/video\.addEventListener\('ended', \(\) => onVerseEnded\(entry\)\)/);
+  assert.match(script,/video\.addEventListener\('seeking', \(\) => onVerseSeek\(entry\)\)/);
+  assert.match(script,/video\.addEventListener\('seeked', \(\) => onVerseSeek\(entry\)\)/);
   assert.match(script,/loop: !!\(p\.verse && Number\.isFinite\(start\)\)/);
   assert.match(script,/entry\.loop = !!\(item\.bibleSrc && item\.loop\)/);
-  assert.match(script,/video\.addEventListener\('ended', \(\) => \{ if \(entry\.loop/);
   assert.match(script,/setInterval\(\(\) => \{ for \(const x of tiles\.values\(\)\) loopVerse\(x\)/);
   assert.equal((script.match(/entry\.loop = false/g)||[]).length,2,'a new source always resets the loop');
+  assert.match(script,/pauseAll'\)\.addEventListener\('click', \(\) => \{[^\n]*x\.shouldPlay = false/);
 });
