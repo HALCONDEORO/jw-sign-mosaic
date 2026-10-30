@@ -34,3 +34,37 @@ test('missing translation is reported, never substituted',()=>{
   assert.match(script,/deferLoad/,'fillPrograms can skip the implicit items[0] fallback');
   assert.match(script,/!!lang\.prog\)/,'restoring a saved selection is strict too');
 });
+
+// --- i18n: the whole UI must exist in both Spanish and English ---
+const dictKeys=(lang)=>{const m=script.match(new RegExp('  '+lang+': \\{([\\s\\S]*?)\\n  \\}'));return [...m[1].matchAll(/(?:^|,)\s*(\w+):\s/gm)].map(x=>x[1]).sort();};
+test('es and en dictionaries expose exactly the same keys',()=>assert.deepEqual(dictKeys('es'),dictKeys('en')));
+test('every t() key used in the code exists in both dictionaries',()=>{
+  const used=[...new Set([...script.matchAll(/\bt\('(\w+)'\)/g)].map(m=>m[1]))];
+  const es=dictKeys('es'),en=dictKeys('en');
+  for(const k of used){assert.ok(es.includes(k),'missing in es: '+k);assert.ok(en.includes(k),'missing in en: '+k);}
+});
+test('every getElementById target exists in the HTML',()=>{
+  const ids=[...new Set([...script.matchAll(/getElementById\('(\w+)'\)/g)].map(m=>m[1]))];
+  for(const id of ids) assert.ok(html.includes('id="'+id+'"'),'missing element #'+id);
+});
+test('applyI18n translates every static UI element',()=>{
+  for(const id of ['tTitle','tSub','playAll','pauseAll','syncAll','addBtn','addSearch','tForAll','globApply','tFooter','addAll','stopAdd','capacityNote'])
+    assert.match(script,new RegExp("getElementById\\('"+id+"'\\)[\\s\\S]{0,140}t\\('"),'applyI18n does not translate #'+id);
+});
+test('tooltips, aria labels and listbox are translated',()=>{
+  assert.match(script,/t\('langListLbl'\)/,'add listbox label');
+  assert.match(script,/t\('langEsTip'\)/,'ES switch label');
+  assert.match(script,/t\('langEnTip'\)/,'EN switch label');
+  for(const k of ['audioTip','fsTip','rmTip']) assert.match(script,new RegExp("aria-label', t\\('"+k+"'\\)"),'tile aria for '+k);
+});
+test('status messages re-render from the active dictionary on language switch',()=>{
+  assert.match(script,/function setStatus\(/,'central status helper');
+  assert.match(script,/statusKey/,'status key tracked per tile');
+  assert.match(script,/statusArg/,'status argument tracked per tile');
+  assert.doesNotMatch(script,/x\.status\.textContent = t\('failMsg'\)/,'no failMsg hard reset that loses the real error on language switch');
+});
+test('no UI string is hardcoded in only one language in the tile template',()=>{
+  const tileTpl=script.match(/tile\.innerHTML = `([\s\S]*?)`;/)[1];
+  assert.doesNotMatch(tileTpl,/title="[^$"]*[A-Za-z]/,'tile template tooltips must come from t()');
+  assert.doesNotMatch(tileTpl,/>\s*[A-Za-z][^<{}$]*</,'tile template static text must come from t()');
+});
