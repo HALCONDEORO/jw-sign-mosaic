@@ -763,3 +763,118 @@ test('verse loop wiring: events call the handlers, chosen verse sets loop, a new
   assert.equal((script.match(/entry\.loop = false/g)||[]).length,2,'a new source always resets the loop');
   assert.match(script,/pauseAll'\)\.addEventListener\('click', \(\) => \{[^\n]*x\.shouldPlay = false/);
 });
+
+// --- Publications (books and brochures) ---
+function pubCtx(extra){
+  const c=vm.createContext(Object.assign({Map,Number,Math,String,Array,Object,Promise,JSON,encodeURIComponent,setTimeout,clearTimeout,RegExp,LANG:'es'},extra||{}));
+  vm.runInContext([grab(/const PUB_MEDIA_URL[^\n]*/),grab(/let BIBLE_TIMEOUT[^\n]*/),grab(/const PUBS = \[[\s\S]*?\n\];/),grab(/const PUB_BY[^\n]*/),grab(/function pubKey\([^\n]*/),grab(/function parsePubKey\([\s\S]*?\n}\n/),grab(/function pubName\([^\n]*/),grab(/function pubLabel\([^\n]*/),'const pubCache = new Map();',grab(/function fetchPubMedia\([\s\S]*?\n}\n/),grab(/async function pubTrackTitles\([\s\S]*?\n}\n/)].join('\n'),c);
+  return c;
+}
+test('Publications: fixed list is well formed and keys are strictly validated',()=>{
+  const c=pubCtx(),run=x=>vm.runInContext(x,c);
+  assert.ok(run('PUBS.length')>=60);
+  assert.equal(run('new Set(PUBS.map(p=>p[0])).size'),run('PUBS.length'),'codes are unique');
+  assert.equal(run('PUBS.every(p=>/^[a-z0-9]{2,8}$/.test(p[0])&&Array.isArray(p[1])&&p[1].length>=1&&p[1].every(n=>Number.isInteger(n))&&p[1].every((n,i,a)=>i===0||n>a[i-1])&&p[2].length>2&&p[3].length>2)'),true);
+  assert.equal(run("pubKey('lmdv',3)"),'pub_lmdv_3');
+  assert.deepEqual(JSON.parse(run("JSON.stringify(parsePubKey('pub_lmdv_3'))")),{code:'lmdv',track:3});
+  for(const bad of ['pub_lmdv_0','pub_lmdv_13','pub_nope_1','PUB_lmdv_1','pub_lmdv','bible_43_3','pub_lmdv_1_2','',null,'pub_lmdv_01x'])
+    assert.equal(run('parsePubKey('+JSON.stringify(bad)+')'),null,String(bad));
+  assert.equal(run("parsePubKey('pub_lmdv_12').track"),12,'last track of a 12-track publication');
+  assert.equal(run("PUB_BY.get('ebtv')[1].length"),14);assert.equal(run("PUB_BY.get('ebtv')[1][13]"),103,'track numbers can have gaps: keys hold the position, not the number');
+  assert.equal(run("parsePubKey('pub_ebtv_14').track"),14);assert.equal(run("parsePubKey('pub_ebtv_15')"),null);
+  assert.equal(run("pubLabel({code:'lmdv',track:2},'T')"),'Hacer discípulos: una obra de amor (videos) - T');
+  assert.equal(run("pubLabel({code:'jy',track:1},'ignored')"),run("pubName('jy')"),'single-video publications show only their name');
+  c.LANG='en';assert.equal(run("pubName('lmdv')"),'Love People—Make Disciples—Videos');
+});
+function pubFile(track,res,title){return {track,title:title||('t'+track),file:{url:'https://cdn/x_ASL_'+String(track).padStart(2,'0')+'_r'+res+'P.mp4'}};}
+test('fetchPubMedia: exact tracks only, smallest file, 404 = none, wrong track count = none, failure not cached',async()=>{
+  let mode='ok',files,calls=[];
+  const c=pubCtx({fetchJSON:async u=>{calls.push(u);if(mode==='404')throw new Error('HTTP 404');if(mode==='net')throw new Error('network');const lg=/langwritten=([A-Z]+)/.exec(u)[1];return {files:{[lg]:{MP4:files}}}}});
+  const run=x=>vm.runInContext(x,c);
+  files=[];for(let i=1;i<=12;i++)files.push(pubFile(i,720),pubFile(i,240));
+  let r=await run("fetchPubMedia('ASL','lmdv')");
+  assert.equal(r.state,'ok');assert.equal(r.tracks.size,12);assert.match(r.tracks.get(3).src,/_03_r240P/);assert.equal(r.tracks.get(3).title,'t3');
+  assert.match(calls[0],/pub=lmdv&langwritten=ASL/);assert.match(calls[0],/fileformat=MP4/);
+  await run("fetchPubMedia('ASL','lmdv')");assert.equal(calls.length,1,'cached');
+  files=files.filter(f=>f.track!==7);
+  assert.equal((await run("fetchPubMedia('ASL','ebtv')")).state,'none','ebtv expects its 14 track numbers, 11 given');
+  files=[];for(const n of [1,2,3,4,5,6,7,8,9,10,11,12,13,103])files.push(pubFile(n,720),pubFile(n,240));
+  r=await run("fetchPubMedia('LSE','ebtv')");assert.equal(r.state,'ok','gaps in track numbers are fine when they match');assert.ok(r.tracks.has(103));
+  files=files.filter(f=>f.track!==13);
+  assert.equal((await run("fetchPubMedia('LSF','ebtv')")).state,'none','13 of 14 tracks: pairing not verified, so the language is not used');
+  files=[];for(const n of [1,2,3,4,5,6,7,8,9,10,11,12,13,104])files.push(pubFile(n,240));
+  assert.equal((await run("fetchPubMedia('KSL','ebtv')")).state,'none','same count but a different track number (104 for 103): not paired');
+  files=[];for(let i=1;i<=11;i++)files.push(pubFile(i,240));
+  assert.equal((await run("fetchPubMedia('LSF','lmdv')")).state,'none','11 tracks where 12 are expected: never paired by guess');
+  files=[];for(let i=1;i<=12;i++)files.push(pubFile(i===5?9:i,240));
+  assert.equal((await run("fetchPubMedia('BSL','lmdv')")).state,'none','a missing track number (duplicate 9) is not paired');
+  files=[pubFile(0,720,'Only'),pubFile(0,240,'Only')];
+  r=await run("fetchPubMedia('DGS','jy')");assert.equal(r.state,'ok','single-video publication ignores the track number');assert.match([...r.tracks.values()][0].src,/r240P/);
+  mode='404';assert.equal((await run("fetchPubMedia('JSL','lmdv')")).state,'none');
+  mode='net';assert.equal((await run("fetchPubMedia('KSL','lmdv')")).state,'failed');
+  mode='ok';files=[];for(let i=1;i<=12;i++)files.push(pubFile(i,240));
+  assert.equal((await run("fetchPubMedia('KSL','lmdv')")).state,'ok','a failure is not cached');
+  files=[{track:1,title:'x',file:{url:'http://insecure/x_r240P.mp4'}}];
+  assert.equal((await run("fetchPubMedia('LSM','jy')")).state,'none','non-https files are ignored');
+});
+test('fetchPubMedia: a request that hangs becomes a retriable failure',async()=>{
+  const c=pubCtx({fetchJSON:()=>new Promise(()=>{})});
+  vm.runInContext('BIBLE_TIMEOUT = 30;',c);
+  assert.equal((await vm.runInContext("fetchPubMedia('ASL','lmdv')",c)).state,'failed');
+  assert.equal(vm.runInContext('pubCache.size',c),0,'not kept');
+});
+function pubFillWorld(answer){
+  const log=[],side=[];
+  const sel={innerHTML:'',classList:{remove(){}},options:[],appendChild(o){this.options.push(o)},selectedIndex:-1,title:''};
+  const c=pubCtx({SEL:{coll:'',key:''},tiles:new Map(),saveState(){side.push('save')},cancelRetry(){side.push('cancelRetry')},sortTiles(){},
+    document:{createElement:()=>({})},
+    setStatus:(e,k,a,err)=>{(k==='loading'?side:log).push(k==='loading'?'loading':['status',k,!!err])},
+    markUnavailable:(e,k)=>log.push(['unavailable',k]),
+    loadTileProgram:async(e,it)=>log.push(['load',it.naturalKey,it.bibleSrc,it.startAt,it.title]),
+    __a:answer});
+  vm.runInContext('fetchPubMedia = async () => __a; pubTrackTitles = async () => new Map([[3,"Titulo 3"]]);',c);
+  vm.runInContext(grab(/async function fillPub\([\s\S]*?\n}\n/),c);
+  const entry={code:'LSE',coll:'PUBS',prog:'',want:'',sel,tile:{classList:{add(){},remove(){}}},video:{src:'old.mp4',paused:false,pauses:0,pause(){this.paused=true;this.pauses++},removeAttribute(){this.src=''},load(){}},note:{textContent:'x'},startAt:5,shouldPlay:true,items:[]};
+  c.tiles.set('LSE',entry);
+  return {c,entry,log,side};
+}
+test('Publication tile: loads exactly the requested track; missing track or language is the black cell; failure is retriable',async()=>{
+  const ok={state:'ok',tracks:new Map([[3,{src:'https://cdn/t3_r240P.mp4',title:'own title'}]])};
+  let w=pubFillWorld(ok);await vm.runInContext('fillPub',w.c)(w.entry,'pub_lmdv_3');
+  assert.deepEqual(w.log,[['load','pub_lmdv_3','https://cdn/t3_r240P.mp4',0,'Hacer discípulos: una obra de amor (videos) - Titulo 3']],'title in the interface language');
+  w=pubFillWorld(ok);await vm.runInContext('fillPub',w.c)(w.entry,'pub_lmdv_4');assert.deepEqual(w.log,[['unavailable','pub_lmdv_4']],'track missing: never another track');
+  w=pubFillWorld({state:'none'});await vm.runInContext('fillPub',w.c)(w.entry,'pub_lmdv_3');assert.deepEqual(w.log,[['unavailable','pub_lmdv_3']]);
+  w=pubFillWorld({state:'failed'});await vm.runInContext('fillPub',w.c)(w.entry,'pub_lmdv_3');
+  assert.deepEqual(w.log,[['status','loadErr',true]]);assert.equal(w.entry.want,'pub_lmdv_3');assert.equal(w.entry.prog,'pub_lmdv_3');assert.equal(w.entry.video.src,'');assert.equal(w.entry.shouldPlay,false);
+  w=pubFillWorld(ok);await vm.runInContext('fillPub',w.c)(w.entry,'garbage');assert.match(w.log[0][1],/^pub_[a-z0-9]+_1$/,'an invalid key falls back to a valid publication, never to another kind of video');
+});
+test('Publication tile: a position past a gap in the track numbers loads that track number',async()=>{
+  const ok={state:'ok',tracks:new Map([[103,{src:'https://cdn/t103_r240P.mp4',title:'x'}],[13,{src:'https://cdn/t13_r240P.mp4',title:''}]])};
+  let w=pubFillWorld(ok);await vm.runInContext('fillPub',w.c)(w.entry,'pub_ebtv_14');assert.equal(w.log[0][2],'https://cdn/t103_r240P.mp4','position 14 = track 103');
+  w=pubFillWorld(ok);await vm.runInContext('fillPub',w.c)(w.entry,'pub_ebtv_13');assert.equal(w.log[0][2],'https://cdn/t13_r240P.mp4');
+});
+test('Publication tile: asking for a new publication stops the old video at once and a stale answer is ignored',async()=>{
+  let release;const slow=new Promise(r=>release=r);
+  const w=pubFillWorld(null);
+  vm.runInContext('fetchPubMedia = () => __slow;',w.c);w.c.__slow=slow;
+  const p=vm.runInContext('fillPub',w.c)(w.entry,'pub_lmdv_3');
+  assert.equal(w.entry.video.src,'','old source removed before the API answers');assert.equal(w.entry.video.paused,true);assert.equal(w.entry.shouldPlay,false);assert.equal(w.entry.want,'pub_lmdv_3');assert.ok(w.side.includes('cancelRetry'));
+  const p2=vm.runInContext('fillPub',w.c)(w.entry,'pub_lmdv_5'); // newer request replaces it
+  release({state:'ok',tracks:new Map([[3,{src:'https://cdn/a.mp4',title:''}],[5,{src:'https://cdn/b.mp4',title:''}]])});
+  await Promise.all([p,p2]);
+  assert.equal(w.log.filter(l=>l[0]==='load').length,1);assert.equal(w.log.find(l=>l[0]==='load')[1],'pub_lmdv_5');
+  const w2=pubFillWorld({state:'ok',tracks:new Map([[3,{src:'https://cdn/a.mp4',title:''}]])});
+  const q=vm.runInContext('fillPub',w2.c)(w2.entry,'pub_lmdv_3');w2.c.tiles.delete('LSE');await q;
+  assert.deepEqual(w2.log,[],'removed tile: nothing loaded');
+});
+test('Publications wiring: section, selection, apply, restore and strict statics',()=>{
+  assert.match(script,/\['PUBS', t\('pubsColl'\)\]/);
+  assert.match(script,/if \(entry\.coll === 'PUBS'\) return fillPub\(entry, keepProg, listOnly\)/);
+  assert.match(script,/if \(isPubs\) \{ x\.coll = coll; x\.prog = ''; x\.want = ''; x\.shouldPlay = false; await fillPub\(x, nk\); return; \}/);
+  assert.match(script,/if \(gc\.value === 'PUBS'\) \{ await buildGlobalPubs\(\); return; \}/);
+  const fp=grab(/async function fillPub\([\s\S]*?\n}\n/);
+  assert.doesNotMatch(fp,/\.play\(\)/,'a publication never autoplays');
+  assert.match(fp,/markUnavailable\(entry, key\)/);
+  const fm=grab(/function fetchPubMedia\([\s\S]*?\n}\n/);
+  assert.match(fm,/best\.size !== expected/,'track count must match exactly');
+});
