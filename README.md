@@ -5,10 +5,15 @@ Watch the same JW Broadcasting program — or any sign-language video publicatio
 
 **Live demo: https://halcondeoro.github.io/jw-sign-mosaic/**
 
+![Twenty sign languages loaded at once, shown as tiles](docs/screenshot-20-languages.png)
+
+Twenty sign languages loaded side by side. The screenshot hides the video area on purpose: it shows the interface only, no jw.org video frames.
+
 ## Features
 
 - **All sign languages**: the sign languages returned by the official catalogue API (/languages/E/all), searchable by name or code ("Añadir lengua" panel). The 8 most common ones load by default.
 - **Publication picker**: each tile can play any video publication available in that language — Every video-library section offered on jw.org for that language: JW Broadcasting monthly programs plus the library collections (spiritual programs, music, series, children's videos, meetings and ministry, ministry tools, Bible, movies, interviews...), grouped as they appear on jw.org.
+- **Books and brochures**: the publication list also includes books and brochures that have video. Every tile loads the same video in its own sign language, found through the pub-media API.
 - **Global apply**: pick a collection and program once and apply it to every tile at once (matched across languages by the program's language-agnostic key).
 - **Load first, then play**: nothing starts by itself. Every tile (including languages you add later) loads paused and shows its first frame; playback starts only when you press Play all (or Sync), together.
 - **Titles in the interface language**: publication lists show English titles with the EN interface and Spanish with ES (from the jw.org English/Spanish listings; items that exist only in sign languages keep the sign-language title).
@@ -37,9 +42,13 @@ Use only for personal, noncommercial viewing. [JW terms](https://www.jw.org/en/t
 
 ## Tests
 
-Run `node --test test/*.test.cjs` (Node 20 or later). The offline tests cover default languages, additions, restoration, input validation, strict program matching, synchronized start, shared volume, share links, retry, tile ordering, storage failures, and the Bible passage picker (strict availability, verse start, verse repeat). They do not prove all catalogue translations exist or that a device can play the entire catalogue at once.
+Run `node --test test/*.test.cjs` (Node 22, the version used by CI). The offline tests cover default languages, additions, restoration, input validation, strict program matching, synchronized start, shared volume, share links, retry, tile ordering, storage failures, and the Bible passage picker (strict availability, verse start, verse repeat). They do not prove all catalogue translations exist or that a device can play the entire catalogue at once.
 
 Personal, unaffiliated project. Not endorsed by JW.org or its publishers.
+
+## Terms and takedown
+
+This repository hosts no jw.org media, transcripts or catalogue copies. It contains the page code, its tests and its documentation. Videos and metadata are requested by the visitor's browser from jw.org servers. If the rights holder asks for a change or removal, it will be done promptly: open an issue or contact the repository owner. No third-party logos or brand assets are included.
 
 ## License
 
