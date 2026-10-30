@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Watch jw.org sign-language video publications in several sign languages at once, streamed directly from the official CDN.">
+<meta name="theme-color" content="#0d1117">
 <title>Mosaico de Lenguas de Signos</title>
 <style>
   :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; }
@@ -15,6 +17,7 @@
   button, select, input { background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:14px; }
   button { cursor:pointer; }
   button:hover, select:hover { border-color:var(--accent); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
   button.primary { background:#1f6feb; border-color:#1f6feb; color:#fff; font-weight:600; }
   .langswitch { flex-shrink:0; }
   .langswitch button { padding:4px 9px; font-size:13px; }
@@ -71,17 +74,17 @@
   <span id="addProgress" role="status"></span>
   <span style="flex:1"></span>
   <div class="addwrap">
-    <button id="addBtn">＋</button>
+    <button id="addBtn" aria-expanded="false" aria-controls="addPanel">＋</button>
     <div id="addPanel" hidden>
-      <input id="addSearch" type="search" autocomplete="off">
-      <div id="addList"></div>
+      <input id="addSearch" type="search" autocomplete="off" aria-label="Search language">
+      <div id="addList" role="listbox" aria-label="Sign languages"></div>
     </div>
   </div>
 </div>
 <div class="globrow">
   <span id="tForAll">Para todas:</span>
-  <select id="globColl"></select>
-  <select id="globProg"></select>
+  <select id="globColl" aria-label="Section for all tiles"></select>
+  <select id="globProg" aria-label="Publication for all tiles"></select>
   <button id="globApply"></button>
 </div>
 <p id="capacityNote" style="margin:10px 18px;color:var(--muted);font-size:13px"></p>
@@ -99,6 +102,7 @@ const I18N = {
     sub: 'JW Broadcasting y otras publicaciones con vídeo en lenguas de signos, varias a la vez. Vídeo en directo desde jw.org.',
     playAll: '▶ Reproducir todos', pauseAll: '⏸ Pausar todos', syncAll: '⟳ Sincronizar',
     addBtn: '＋ Añadir lengua…', searchPh: 'Buscar lengua (nombre o código)…', noResults: 'Sin resultados.',
+    collLbl: 'Sección', progLbl: 'Publicación', globCollLbl: 'Sección para todas', globProgLbl: 'Publicación para todas',
     forAll: 'Para todas:', applyAll: 'Aplicar a todas',
     counter: n => n + ' lenguas seleccionadas',
     loading: 'Cargando…', retrying: 'Reintentando…',
@@ -123,6 +127,7 @@ const I18N = {
     sub: 'JW Broadcasting and other sign-language video publications, several at once. Streamed live from jw.org.',
     playAll: '▶ Play all', pauseAll: '⏸ Pause all', syncAll: '⟳ Sync',
     addBtn: '＋ Add language…', searchPh: 'Search language (name or code)…', noResults: 'No results.',
+    collLbl: 'Section', progLbl: 'Publication', globCollLbl: 'Section for all tiles', globProgLbl: 'Publication for all tiles',
     forAll: 'For all:', applyAll: 'Apply to all',
     counter: n => n + ' languages selected',
     loading: 'Loading…', retrying: 'Retrying…',
@@ -316,16 +321,17 @@ async function addTile(lang) {
   tile.innerHTML = `
     <div class="tile-head">
       <span class="lang"></span>
-      <button class="audio" title="${t('audioTip')}">🔇</button>
-      <button class="fs" title="${t('fsTip')}">⛶</button>
-      <button class="rm" title="${t('rmTip')}">✕</button>
+      <button class="audio" title="${t('audioTip')}" aria-label="${t('audioTip')}">🔇</button>
+      <button class="fs" title="${t('fsTip')}" aria-label="${t('fsTip')}">⛶</button>
+      <button class="rm" title="${t('rmTip')}" aria-label="${t('rmTip')}">✕</button>
     </div>
     <select class="colls" style="margin:0 8px 4px;font-size:12px;max-width:calc(100% - 16px)"></select>
     <select class="programs" style="margin:0 8px 6px;font-size:12px;max-width:calc(100% - 16px)"></select>
     <div class="videowrap"></div>
-    <div class="status">${t('loading')}</div>`;
+    <div class="status" role="status">${t('loading')}</div>`;
   grid.appendChild(tile);
-  tile.querySelector('.lang').textContent = lang.label || labelFor(lang.code);
+  const langLabel = lang.label || labelFor(lang.code);
+  tile.querySelector('.lang').textContent = langLabel;
   const status = tile.querySelector('.status');
   const selColl = tile.querySelector('.colls');
   const sel = tile.querySelector('.programs');
@@ -337,6 +343,7 @@ async function addTile(lang) {
 
   const video = document.createElement('video');
   video.muted = true; video.autoplay = true; video.playsInline = true; video.controls = true; video.preload = 'auto';
+  video.setAttribute('aria-label', langLabel);
   wrap.appendChild(video);
   let loadTimer = null;
   const armWatchdog = () => {
@@ -370,6 +377,8 @@ async function addTile(lang) {
     }
   });
 
+  selColl.setAttribute('aria-label', t('collLbl') + ' — ' + langLabel);
+  sel.setAttribute('aria-label', t('progLbl') + ' — ' + langLabel);
   const entry = { code: lang.code, coll: lang.coll || 'StudioMonthlyPrograms', prog: lang.prog || '',
                   video, audioBtn: tile.querySelector('.audio'), tile, sel, selColl, status, items: [], armWatchdog };
   tiles.set(lang.code, entry);
@@ -478,10 +487,18 @@ function renderAddList() {
     list.appendChild(b);
   }
 }
-document.getElementById('addBtn').addEventListener('click', () => {
+function setAddPanel(open) {
   const p = document.getElementById('addPanel');
-  p.hidden = !p.hidden;
-  if (!p.hidden) { document.getElementById('addSearch').value = ''; renderAddList(); document.getElementById('addSearch').focus(); }
+  p.hidden = !open;
+  document.getElementById('addBtn').setAttribute('aria-expanded', String(open));
+  if (open) { document.getElementById('addSearch').value = ''; renderAddList(); document.getElementById('addSearch').focus(); }
+}
+document.getElementById('addBtn').addEventListener('click', () => setAddPanel(document.getElementById('addPanel').hidden));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !document.getElementById('addPanel').hidden) {
+    setAddPanel(false);
+    document.getElementById('addBtn').focus();
+  }
 });
 document.getElementById('addSearch').addEventListener('input', renderAddList);
 
@@ -537,7 +554,7 @@ document.getElementById('addAll').addEventListener('click', addCatalogLanguages)
 document.getElementById('stopAdd').addEventListener('click', () => { stopAddingAll = true; });
 
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('.addwrap')) document.getElementById('addPanel').hidden = true;
+  if (!e.target.closest('.addwrap')) setAddPanel(false);
 });
 
 function applyI18n() {
@@ -554,6 +571,12 @@ function applyI18n() {
   document.getElementById('globApply').textContent = t('applyAll');
   document.getElementById('tFooter').textContent = t('footer');
   document.getElementById('addAll').textContent = t('addAll');
+  document.getElementById('globColl').setAttribute('aria-label', t('globCollLbl'));
+  document.getElementById('globProg').setAttribute('aria-label', t('globProgLbl'));
+  document.getElementById('addSearch').setAttribute('aria-label', t('searchPh'));
+  document.getElementById('addList').setAttribute('aria-label', t('addBtn'));
+  document.getElementById('langES').setAttribute('aria-pressed', String(LANG === 'es'));
+  document.getElementById('langEN').setAttribute('aria-pressed', String(LANG === 'en'));
   document.getElementById('stopAdd').textContent = t('stopAdd');
   document.getElementById('capacityNote').textContent = t('capacity');
   document.getElementById('langES').classList.toggle('active', LANG === 'es');
@@ -576,8 +599,14 @@ function setLang(l) {
       x.status.textContent = t('failMsg');
     }
     x.tile.querySelector('.audio').title = t('audioTip');
+    x.tile.querySelector('.audio').setAttribute('aria-label', t('audioTip'));
     x.tile.querySelector('.fs').title = t('fsTip');
+    x.tile.querySelector('.fs').setAttribute('aria-label', t('fsTip'));
     x.tile.querySelector('.rm').title = t('rmTip');
+    x.tile.querySelector('.rm').setAttribute('aria-label', t('rmTip'));
+    const lbl = x.tile.querySelector('.lang').textContent;
+    x.selColl.setAttribute('aria-label', t('collLbl') + ' — ' + lbl);
+    x.sel.setAttribute('aria-label', t('progLbl') + ' — ' + lbl);
   }
   refreshGlobalPicker(true);
   renderAddList();
