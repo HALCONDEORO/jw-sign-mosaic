@@ -120,6 +120,7 @@ const I18N = {
     addedSummary: (n, stopped) => (stopped ? 'Adición detenida. ' : 'Adición terminada. ') + n + ' lenguas añadidas.',
     capacity: 'Empieza con las ocho habituales y añade más. Sin límite fijo; la capacidad real depende de tu dispositivo y de la conexión.',
     audioTip: 'Escuchar esta lengua', fsTip: 'Pantalla completa', rmTip: 'Quitar',
+    langListLbl: 'Lenguas de signos', langEsTip: 'Cambiar a español', langEnTip: 'Cambiar a inglés',
     footer: 'Vídeos servidos directamente desde los servidores de jw.org (API pública y CDN). Herramienta personal, sin afiliación ni respaldo oficial. La reproducción simultánea depende de la disponibilidad del vídeo y de tu dispositivo.'
   },
   en: {
@@ -145,6 +146,7 @@ const I18N = {
     addedSummary: (n, stopped) => (stopped ? 'Stopped adding. ' : 'Finished adding. ') + n + ' languages added.',
     capacity: 'Start with the usual eight and add more. No fixed limit; actual capacity depends on your device and connection.',
     audioTip: 'Listen to this language', fsTip: 'Fullscreen', rmTip: 'Remove',
+    langListLbl: 'Sign languages', langEsTip: 'Switch to Spanish', langEnTip: 'Switch to English',
     footer: 'Videos served directly from jw.org servers (public API and CDN). Personal tool, not affiliated or endorsed. Simultaneous playback depends on video availability and your device.'
   }
 };
@@ -179,7 +181,7 @@ function loadState() {
     const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
     if (saved && Array.isArray(saved.langs) && saved.langs.length) return saved;
   } catch (e) {}
-  try { // migración desde v1
+  try { // migration from v1
     const old = JSON.parse(localStorage.getItem('jwSignMosaic.langs.v1') || 'null');
     if (Array.isArray(old) && old.length) return { langs: old };
   } catch (e) {}
@@ -190,6 +192,13 @@ function saveState() {
   localStorage.setItem(LS_KEY, JSON.stringify({ langs }));
 }
 function updateCounter() { document.getElementById('counter').textContent = t('counter')(tiles.size); }
+function setStatus(entry, key, arg, isErr) { // every visible status comes from the active dictionary
+  entry.statusKey = key; entry.statusArg = arg;
+  entry.status.style.display = '';
+  entry.status.classList.toggle('err', !!isErr);
+  const v = t(key);
+  entry.status.textContent = (typeof v === 'function') ? v(arg) : v;
+}
 function labelFor(code) {
   const l = ALL_SIGN_LANGS.find(x => x.code === code);
   return l ? l.name + ' (' + l.code + ')' : code;
@@ -201,7 +210,7 @@ async function fetchJSON(url) {
   return r.json();
 }
 
-// Devuelve [{naturalKey,title,group,media,agnostic}] aplanando un nivel de subcategorías.
+// Returns [{naturalKey,title,group,media,agnostic}] flattening one subcategory level.
 async function fetchCollection(code, collKey) {
   const out = [];
   try {
@@ -220,7 +229,7 @@ async function fetchCollection(code, collKey) {
           for (const m of (scat.media || []).filter(x => x.type === 'video')) {
             out.push({ naturalKey: m.naturalKey, title: m.title, group: sub.name || sub.key, media: m, agnostic: m.languageAgnosticNaturalKey });
           }
-        } catch (e) { /* colección vacía para esta lengua */ }
+        } catch (e) { /* empty collection for this language */ }
       }
     }
   } catch (e) { return []; }
@@ -251,15 +260,13 @@ function muteOthers(except) {
   }
 }
 
-function markUnavailable(entry, msgKey) { // nunca sustituir por otro vídeo: avisar y dejar la tarjeta vacía
+function markUnavailable(entry, msgKey) { // never substitute another video: report it and leave the tile empty
   const { status, tile, video, sel } = entry;
   sel.selectedIndex = -1;
   entry.prog = '';
   tile.classList.add('novideo');
   video.pause(); video.removeAttribute('src'); video.load();
-  status.style.display = ''; status.classList.remove('err');
-  entry.statusKey = msgKey || 'noEquiv';
-  status.textContent = t(entry.statusKey);
+  setStatus(entry, msgKey || 'noEquiv');
   saveState(); refreshGlobalPicker();
 }
 
@@ -269,9 +276,7 @@ async function loadTileProgram(entry, item) {
   if (!item) {
     tile.classList.add('novideo');
     video.pause(); video.removeAttribute('src'); video.load();
-    status.style.display = ''; status.classList.remove('err');
-    entry.statusKey = 'noVideoPub';
-    status.textContent = t('noVideoPub');
+    setStatus(entry, 'noVideoPub');
     saveState(); refreshGlobalPicker();
     return;
   }
@@ -279,11 +284,11 @@ async function loadTileProgram(entry, item) {
   try {
     const src = pickFile(item.media || {});
     if (src) {
-      status.style.display = ''; status.classList.remove('err'); status.textContent = t('loading');
+      setStatus(entry, 'loading');
       video.src = src; video.load(); video.play().catch(() => {});
       if (entry.armWatchdog) entry.armWatchdog();
-    } else { status.textContent = t('noMp4'); status.classList.add('err'); }
-  } catch (e) { status.textContent = t('loadErr')(e.message); status.classList.add('err'); }
+    } else { setStatus(entry, 'noMp4', undefined, true); }
+  } catch (e) { setStatus(entry, 'loadErr', e.message, true); }
   saveState(); refreshGlobalPicker();
 }
 
@@ -293,7 +298,7 @@ async function fillPrograms(entry, keepProg, strict, deferLoad) {
   const items = await fetchCollection(code, entry.coll);
   entry.items = items;
   const groups = new Map();
-  for (const it of items) { // sin recorte: el cancionero de reuniones tiene 163 vídeos
+  for (const it of items) { // no truncation: the meeting songbook has 163 videos
     if (!groups.has(it.group)) groups.set(it.group, []);
     groups.get(it.group).push(it);
   }
@@ -311,12 +316,12 @@ async function fillPrograms(entry, keepProg, strict, deferLoad) {
     const nk = normKey({ naturalKey: keepProg });
     const found = items.findIndex(it => it.naturalKey === keepProg || (nk && normKey(it) === nk));
     if (found >= 0) idx = found;
-    else if (strict) { // pidieron una publicación concreta y no hay equivalente en esta lengua
+    else if (strict) { // a specific publication was requested and has no equivalent in this language
       markUnavailable(entry);
       return;
     }
   }
-  if (deferLoad && !keepProg) { sel.selectedIndex = -1; return; } // no cargar el primero: el llamador decide
+  if (deferLoad && !keepProg) { sel.selectedIndex = -1; return; } // do not load the first item: the caller decides
   sel.selectedIndex = idx;
   await loadTileProgram(entry, items[idx]);
 }
@@ -357,8 +362,7 @@ async function addTile(lang) {
     clearTimeout(loadTimer);
     loadTimer = setTimeout(() => {
       if (video.src && !video.error && video.readyState < 3 && !tile.classList.contains('novideo')) {
-        status.style.display = ''; status.classList.add('err');
-        status.textContent = t('slowMsg');
+        setStatus(entry, 'slowMsg', undefined, true);
       }
     }, 12000);
   };
@@ -368,18 +372,17 @@ async function addTile(lang) {
     clearTimeout(loadTimer);
     if (!retried && video.src) {
       retried = true;
-      status.textContent = t('retrying');
+      setStatus(entry, 'retrying');
       const src = video.src;
       setTimeout(() => { video.src = src; video.load(); video.play().catch(() => {}); armWatchdog(); }, 3000);
     } else {
-      status.textContent = t('failMsg');
-      status.classList.add('err');
+      setStatus(entry, 'failMsg', undefined, true);
     }
   });
   status.style.cursor = 'pointer';
   status.addEventListener('click', () => {
     if (status.classList.contains('err') && video.src) {
-      status.classList.remove('err'); status.textContent = t('loading');
+      setStatus(entry, 'loading');
       video.load(); video.play().catch(() => {}); armWatchdog();
     }
   });
@@ -387,7 +390,7 @@ async function addTile(lang) {
   selColl.setAttribute('aria-label', t('collLbl') + ' — ' + langLabel);
   sel.setAttribute('aria-label', t('progLbl') + ' — ' + langLabel);
   const entry = { code: lang.code, coll: lang.coll || 'StudioMonthlyPrograms', prog: lang.prog || '',
-                  video, audioBtn: tile.querySelector('.audio'), tile, sel, selColl, status, items: [], armWatchdog };
+                  video, audioBtn: tile.querySelector('.audio'), tile, sel, selColl, status, items: [], armWatchdog, statusKey: 'loading' };
   tiles.set(lang.code, entry);
   selColl.value = entry.coll;
   updateCounter(); saveState(); refreshGlobalPicker();
@@ -408,7 +411,7 @@ async function addTile(lang) {
     updateCounter(); saveState(); refreshGlobalPicker(); renderAddList();
   });
 
-  // lengua nueva: heredar la publicación que ya suena en las demás tarjetas
+  // new language: inherit the publication already playing on the other tiles
   let inheritProg = '';
   if (!lang.coll && !lang.prog) {
     const ref = [...tiles.values()].find(x => x.code !== lang.code && x.prog && x.items && x.items.length);
@@ -431,7 +434,7 @@ async function refreshGlobalPrograms(keepProg) {
   gp.innerHTML = '';
   if (!first || !gc.value) return;
   const items = (first.coll === gc.value && first.items && first.items.length) ? first.items : await fetchCollection(first.code, gc.value);
-  if (req !== globProgReq) return; // respuesta vieja: el usuario ya volvio a cambiar
+  if (req !== globProgReq) return; // stale response: the user changed the selection again
   for (const it of items) { const o = document.createElement('option'); o.value = normKey(it); o.textContent = it.title; gp.appendChild(o); }
   let idx = 0;
   if (keepProg) { const k = items.findIndex(it => normKey(it) === keepProg); if (k >= 0) idx = k; }
@@ -440,17 +443,17 @@ async function refreshGlobalPrograms(keepProg) {
 function refreshGlobalPicker(force) {
   const gc = document.getElementById('globColl');
   const gp = document.getElementById('globProg');
-  if (!force && (document.activeElement === gc || document.activeElement === gp)) return; // no reconstruir mientras el usuario lo usa
+  if (!force && (document.activeElement === gc || document.activeElement === gp)) return; // do not rebuild while the user is interacting with it
   const first = [...tiles.values()].find(x => x.items && x.items.length);
   const fp = first ? first.coll + ':' + first.items.length + ':' + (first.items[0] && first.items[0].naturalKey) + ':' + LANG : '';
-  if (!force && fp === refreshGlobalPicker._fp && gp.options.length) return; // nada nuevo
+  if (!force && fp === refreshGlobalPicker._fp && gp.options.length) return; // nothing new
   refreshGlobalPicker._fp = fp;
   const prevColl = gc.value, prevProg = gp.value;
   gc.innerHTML = '';
   for (const [key, name] of collectionsFor()) { const o = document.createElement('option'); o.value = key; o.textContent = name; gc.appendChild(o); }
   if (prevColl && [...gc.options].some(o => o.value === prevColl)) gc.value = prevColl;
   else if (first) gc.value = first.coll;
-  // el selector de programas siempre sigue a la categoria elegida
+  // the program picker always follows the chosen category
   refreshGlobalPrograms(gc.value === prevColl ? prevProg : '');
 }
 document.getElementById('globColl').addEventListener('change', () => refreshGlobalPrograms(''));
@@ -463,9 +466,9 @@ document.getElementById('globApply').addEventListener('click', async () => {
     if (nk) {
       const it = x.items.find(y => normKey(y) === nk);
       if (it) { x.sel.value = it.naturalKey; await loadTileProgram(x, it); }
-      else markUnavailable(x); // la publicación no existe en esta lengua: avisar, no sustituir
+      else markUnavailable(x); // the publication does not exist in this language: report it, never substitute
     }
-    await new Promise(r => setTimeout(r, 250)); // respiro entre tarjetas
+    await new Promise(r => setTimeout(r, 250)); // breathing room between tiles
   }
 });
 
@@ -582,7 +585,11 @@ function applyI18n() {
   document.getElementById('globColl').setAttribute('aria-label', t('globCollLbl'));
   document.getElementById('globProg').setAttribute('aria-label', t('globProgLbl'));
   document.getElementById('addSearch').setAttribute('aria-label', t('searchPh'));
-  document.getElementById('addList').setAttribute('aria-label', t('addBtn'));
+  document.getElementById('addList').setAttribute('aria-label', t('langListLbl'));
+  document.getElementById('langES').setAttribute('aria-label', t('langEsTip'));
+  document.getElementById('langES').title = t('langEsTip');
+  document.getElementById('langEN').setAttribute('aria-label', t('langEnTip'));
+  document.getElementById('langEN').title = t('langEnTip');
   document.getElementById('langES').setAttribute('aria-pressed', String(LANG === 'es'));
   document.getElementById('langEN').setAttribute('aria-pressed', String(LANG === 'en'));
   document.getElementById('stopAdd').textContent = t('stopAdd');
@@ -596,15 +603,15 @@ function setLang(l) {
   LANG = l;
   localStorage.setItem('jwSignMosaic.lang', l);
   applyI18n();
-  for (const x of tiles.values()) { // re-traducir en caliente, sin tocar los vídeos
+  for (const x of tiles.values()) { // re-translate in place, without touching the videos
     const prev = x.selColl.value;
     x.selColl.innerHTML = '';
     for (const [key, name] of collectionsFor()) { const o = document.createElement('option'); o.value = key; o.textContent = name; x.selColl.appendChild(o); }
     x.selColl.value = prev;
-    if (x.status.style.display !== 'none' && !x.status.classList.contains('err')) {
-      x.status.textContent = t(x.statusKey || (x.tile.classList.contains('novideo') ? 'noVideoPub' : 'loading'));
-    } else if (x.status.classList.contains('err')) {
-      x.status.textContent = t('failMsg');
+    if (x.status.style.display !== 'none') {
+      const key = x.statusKey || (x.tile.classList.contains('novideo') ? 'noVideoPub' : 'loading');
+      const v = t(key);
+      x.status.textContent = (typeof v === 'function') ? v(x.statusArg) : v;
     }
     x.tile.querySelector('.audio').title = t('audioTip');
     x.tile.querySelector('.audio').setAttribute('aria-label', t('audioTip'));
@@ -643,7 +650,7 @@ setInterval(() => {
   const state = loadState();
   for (const l of restoredLanguages(state.langs, ALL_SIGN_LANGS)) {
     await addTile({ ...l, label: l.label || labelFor(l.code) });
-    await new Promise(r => setTimeout(r, 400)); // escalonar: no ahogar la red con N vídeos a la vez
+    await new Promise(r => setTimeout(r, 400)); // stagger: do not flood the network with N videos at once
   }
 })();
 </script>
