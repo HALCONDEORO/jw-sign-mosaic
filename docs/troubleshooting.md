@@ -10,7 +10,7 @@ Use the **↻ Retry failed (N)** button that appears at the top; it reloads only
 
 ## A tile is black and says "Not available in this language"
 
-That is not an error: the chosen publication does not exist in that language on jw.org, the selected Bible passage has no video there, or the language's file set does not match the curated books/brochures list. Pick another program, or remove that language for this session.
+That is not an error: the chosen publication does not exist in that language on jw.org, the language has no video of the chosen Bible chapter or no marker for the chosen verse, or its file set does not match the curated books/brochures list. Pick another program, or remove that language for this session.
 
 ## Play all starts only some tiles
 
@@ -18,7 +18,7 @@ Tiles that were still loading are skipped and the page tells you ("N not loaded 
 
 ## The publication list looks short or says it is incomplete
 
-The list is fetched live and can arrive truncated on a slow connection ("The publication list is incomplete. Use Retry failed."). Press **↻ Retry failed** to fetch it again. If the list was incomplete, retrying fetches it in full; a publication still missing from a complete list is not offered for that language.
+The list is fetched live and can arrive truncated on a slow connection ("The publication list is incomplete. Use Retry failed."). Press **↻ Retry failed** to fetch it again. Retrying tries fetching it again; network failures can persist. A publication missing from a complete list is not offered for that language.
 
 ## The videos stutter or the page feels slow
 
