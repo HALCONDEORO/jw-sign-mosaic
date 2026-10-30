@@ -5,9 +5,9 @@ Watch the same JW Broadcasting program — or any sign-language video publicatio
 
 **Live demo: https://halcondeoro.github.io/jw-sign-mosaic/**
 
-![Twenty sign languages loaded at once, shown as tiles](docs/screenshot-20-languages.png)
+![Twenty sign languages playing Psalm 23 at once, shown as tiles](docs/screenshot-20-languages.png)
 
-Twenty sign languages loaded side by side. The screenshot hides the video area on purpose: it shows the interface only, no jw.org video frames.
+Twenty sign languages playing Psalm 23 side by side, synchronized mid-passage. The video areas are blurred on purpose: the interface and the playback state are visible, but no recognizable jw.org video content is stored in this repository.
 
 ## Features
 
