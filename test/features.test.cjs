@@ -746,6 +746,12 @@ test('onVerseEnded: a seek out of the verse window invalidates the loop; playbac
   // no sample at all (e.g. source just switched): no wrap
   x=loopTile({endAt:undefined});x.video.paused=true;x.video.ended=true;
   assert.equal(end(x),false);assert.equal(x.video.plays,0,'no previous sample');
+  // last verse: a seek to the exact end of the video is not a natural crossing
+  x=loopTile({endAt:undefined});x.video.duration=100;x.video.currentTime=100;seek(x);x.video.paused=true;x.video.ended=true;
+  assert.equal(end(x),false);assert.equal(x.video.plays,0,'seek to duration exactly');assert.equal(x.video.currentTime,100);
+  // last verse: natural playback reaches the end with the last sample before it
+  x=loopTile({endAt:undefined});x.video.duration=100;x.video.currentTime=99;run(x);x.video.currentTime=100;x.video.paused=true;x.video.ended=true;
+  assert.equal(end(x),true);assert.equal(x.video.plays,1,'last sample before duration');assert.equal(x.video.currentTime,10);
 });
 test('verse loop wiring: events call the handlers, chosen verse sets loop, a new source resets it, Pause all clears shouldPlay',()=>{
   assert.match(script,/video\.addEventListener\('ended', \(\) => onVerseEnded\(entry\)\)/);
