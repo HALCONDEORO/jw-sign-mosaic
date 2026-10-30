@@ -11,8 +11,8 @@ test('duplicates and spoken languages excluded',()=>assert.equal(context.remaini
 test('already selected catalogue is empty',()=>assert.equal(context.remainingLanguages(catalog,catalog.map(x=>x.code)).length,0));
 test('no forced 16 limit on add or restoration',()=>{assert.doesNotMatch(script,/MAX_TILES|slice\(0,\s*16\)/)});
 test('bulk add is explicit and confirmed',()=>{assert.match(script,/confirm\(t\('confirmAll'\)\(pending.length\)\)/);assert.doesNotMatch(script.slice(script.indexOf('(async function init()')),/addCatalogLanguages\(/)});
-test('bulk add sequential and stoppable',()=>{assert.match(script,/if \(stopAddingAll\) break/);assert.match(script,/await addTile\(/);assert.match(script,/finally \{/)});
-test('strict publication is passed to translations',()=>assert.match(script,/!!inheritProg \|\| !!lang.strictPublication/));
+test('bulk add sequential and stoppable',()=>{assert.match(script,/if \(stopAddingAll \|\| gen !== mosaicGen\) break/);assert.match(script,/await addTile\(/);assert.match(script,/finally \{/)});
+test('strict publication is passed to translations',()=>assert.match(script,/fillPrograms\(entry, wantKey, !!wantKey\)/));
 test('restore filters against non-empty catalogue',()=>assert.equal(context.restoredLanguages([{code:'S1'},{code:'S2'},{code:'S1'},{code:'EN'}],catalog).length,2));
 test('catalogue failure preserves eight defaults',()=>assert.equal(context.restoredLanguages(['LSE','ASL','BSL','LSB','LSM','LSF','ISL','DGS'].map(code=>({code})),[]).length,8));
 test('catalogue failure preserves safe saved codes above16, deduplicated',()=>assert.equal(context.restoredLanguages([...catalog.map(x=>({code:x.code})),{code:'S0'}],[]).length,110));
@@ -30,9 +30,9 @@ test('no picker truncates the 163-song meeting catalog',()=>{
 });
 test('missing translation is reported, never substituted',()=>{
   assert.match(script,/function markUnavailable\(/);
-  assert.match(script,/else markUnavailable\(x\)/,'global apply marks unmatched tiles instead of keeping a different video');
+  assert.match(script,/else markUnavailable\(x, nk\)/,'global apply marks unmatched tiles instead of keeping a different video');
   assert.match(script,/deferLoad/,'fillPrograms can skip the implicit items[0] fallback');
-  assert.match(script,/!!lang\.prog\)/,'restoring a saved selection is strict too');
+  assert.match(script,/const wantKey = entry\.prog \|\| entry\.want \|\| inheritProg/,'restoring a saved selection is strict too');
 });
 
 // --- i18n: the whole UI must exist in both Spanish and English ---
@@ -107,7 +107,7 @@ test('apply-to-all resolves tiles in parallel, not one by one',()=>{
   assert.match(apply,/Promise\.all/,'waits a pool of workers');
   assert.match(apply,/Math\.min\(6, queue\.length\)/,'bounded concurrency pool');
   assert.doesNotMatch(apply,/setTimeout/,'no artificial per-tile delay');
-  assert.match(apply,/markUnavailable\(x\)/,'still reports, never substitutes');
+  assert.match(apply,/markUnavailable\(x, nk\)/,'still reports, never substitutes');
 });
 
 // --- remove-all button ---
@@ -117,8 +117,9 @@ test('remove-all button exists, translated and guarded',()=>{
   for(const k of ['rmAll','confirmRmAll']){assert.ok(dictKeys('es').includes(k)&&dictKeys('en').includes(k),k+' in both dictionaries');}
   const h=script.match(/getElementById\('rmAll'\)\.addEventListener\('click'[\s\S]*?\n\}\);/)[0];
   assert.match(h,/confirm\(t\('confirmRmAll'\)\)/,'asks first');
-  assert.match(h,/if \(!tiles\.size\) return/,'no-op when empty');
-  assert.match(h,/tiles\.clear\(\)/,'clears every tile');
-  assert.match(h,/x\.video\.pause\(\)/,'stops playback explicitly');
+  assert.match(h,/if \(!tiles\.size && !addingAll\) return/,'no-op when empty and nothing is being added');
+  const r=script.match(/function removeAllTiles\(\) \{[\s\S]*?\n}\n/)[0];
+  assert.match(r,/tiles\.clear\(\)/,'clears every tile');
+  assert.match(r,/x\.video\.pause\(\)/,'stops playback explicitly');
   assert.doesNotMatch(h,/location\.reload/,'never reloads the page');
 });
