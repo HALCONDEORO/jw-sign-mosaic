@@ -453,7 +453,8 @@ test('only Play all / Sync start playback; Pause all clears every intent',async(
 test('static: no autoplay, no play() outside startTogether and the intent-gated safety net',()=>{
   assert.match(script,/video\.autoplay = false/);
   const plays=[...script.matchAll(/\.play\(\)/g)].length;
-  assert.equal(plays,2,'startTogether and autoResume only');
+  assert.equal(plays,3,'startTogether, autoResume, and the verse loop restarting a tile that was already playing');
+  assert.match(grab(/function onVerseEnded[\s\S]*?\n}\n/),/!x\.shouldPlay/,'the third play() is only the verse-loop restart, gated on shouldPlay');
   assert.match(grab(/function autoResume\(\) \{[\s\S]*?\n}/),/x\.shouldPlay && x\.video\.src/);
   assert.match(script,/video\.addEventListener\('loadeddata', loaded\)/,'a loaded paused tile does not stay on "Loading…"');
 });
@@ -572,20 +573,23 @@ function fillWorld(chapter){
     document:{createElement:()=>opt()},
     setStatus:(e,k,a,err)=>{(k==='loading'?side:log).push(k==='loading'?'loading':['status',k,!!err])},
     markUnavailable:(e,k)=>log.push(['unavailable',k]),
-    loadTileProgram:async(e,it)=>log.push(['load',it.naturalKey,it.startAt,it.verseNote,it.bibleSrc]),
+    loadTileProgram:async(e,it)=>log.push(['load',it.naturalKey,it.startAt,!!it.verseNote,it.bibleSrc]),
     __ch:chapter});
   vm.runInContext('fetchBibleChapter = async () => __ch;',c);
+  vm.runInContext(grab(/function verseEnd\([\s\S]*?\n}\n/),c);
   vm.runInContext(grab(/async function fillBible\([\s\S]*?\n}\n/),c);
   const entry={code:'LSE',coll:'BIBLE',prog:'',want:'',sel,tile:{classList:{add(){},remove(){}}},video:{src:'old.mp4',paused:false,pauses:0,pause(){this.paused=true;this.pauses++},removeAttribute(){this.src=''},load(){}},note:{textContent:'x'},startAt:123,shouldPlay:true,items:[]};
   c.tiles.set('LSE',entry);
   return {c,entry,log,side};
 }
-test('Bible tile: loads exactly the requested chapter at its verse; no verse = chapter start; missing marker = start + note',async()=>{
+test('Bible tile: loads exactly the requested chapter at its verse; no verse = chapter start; missing verse marker = unavailable cell',async()=>{
   const ok={state:'ok',src:'https://cdn/a_r240P.mp4',verses:new Map([[16,197.6]])};
   let w=fillWorld(ok);await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_16');
   assert.deepEqual(w.log,[['load','bible_43_3_16',197.6,false,'https://cdn/a_r240P.mp4']]);
   w=fillWorld(ok);await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3');assert.deepEqual(w.log,[['load','bible_43_3',0,false,'https://cdn/a_r240P.mp4']]);
-  w=fillWorld(ok);await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_99');assert.deepEqual(w.log,[['load','bible_43_3_99',0,true,'https://cdn/a_r240P.mp4']]);
+  w=fillWorld(ok);await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_99');assert.deepEqual(w.log,[['unavailable','bible_43_3_99']],'no marker for the verse: black cell, the chapter is not loaded from its start');
+  w=fillWorld({state:'ok',src:'https://cdn/a_r240P.mp4',verses:new Map()});await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3');assert.deepEqual(w.log,[['load','bible_43_3',0,false,'https://cdn/a_r240P.mp4']],'whole chapter is unchanged even without markers');
+  w=fillWorld({state:'ok',src:'https://cdn/a_r240P.mp4',verses:new Map([[16,197.6],[17,210]])});await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_17');assert.equal(w.log[0][0],'load');
 });
 test('Bible tile: language without the chapter is a black unavailable cell, never another passage; a failed request is retriable',async()=>{
   let w=fillWorld({state:'none'});await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_16');
@@ -665,4 +669,97 @@ test('Bible request that hangs becomes a retriable failure after the timeout',as
   vm.runInContext("fetchJSON = async () => ({files:{LSE:{MP4:[{track:3,file:{url:'https://cdn/a_r240P.mp4'},duration:1,markers:null}]}}})",c);
   assert.equal((await vm.runInContext("fetchBibleChapter('LSE',43,3)",c)).state,'ok','the timed-out failure is not cached');
   assert.match(script,/entry\.prog = ''; entry\.want = key;/);
+});
+
+// --- a chosen verse repeats instead of running on ---
+test('verseEnd: next marker after the verse, none for the last verse',()=>{
+  const c=vm.createContext({Infinity});vm.runInContext(grab(/function verseEnd\([\s\S]*?\n}\n/),c);
+  const m=new Map([[1,0],[2,10],[3,25.5]]);c.m=m;
+  assert.equal(vm.runInContext('verseEnd(m,10)',c),25.5);assert.equal(vm.runInContext('verseEnd(m,0)',c),10);
+  assert.equal(vm.runInContext('verseEnd(m,25.5)',c),undefined);
+});
+function loopCtx(){
+  const c=vm.createContext({Number,Promise,syncing:false,userPaused:false,tiles:new Map()});
+  vm.runInContext([grab(/function loopVerse\([\s\S]*?\n}\n/),grab(/function onVerseSeek\([^\n]*/),grab(/function onVerseEnded\([\s\S]*?\n}\n/)].join('\n'),c);
+  return c;
+}
+function loopTile(o){
+  const v={paused:false,ended:false,seeking:false,currentTime:10,src:'https://cdn/x.mp4',error:null,plays:0,play(){this.plays++;this.paused=false;return Promise.resolve()}};
+  const x=Object.assign({code:'ASL',loop:true,startAt:10,endAt:25,shouldPlay:true,loopSrc:'https://cdn/x.mp4',tile:{classList:{contains:()=>false}},video:v},o);
+  return x;
+}
+test('loopVerse wraps on a real crossing of endAt, even after a long throttled gap',()=>{
+  const c=loopCtx(),run=x=>{c.x=x;return vm.runInContext('loopVerse(x)',c)};
+  const x=loopTile();
+  for(const t of [10,15,24.9]){x.video.currentTime=t;assert.equal(run(x),false);}
+  x.video.currentTime=25.04;assert.equal(run(x),true);assert.equal(x.video.currentTime,10);
+  const y=loopTile();y.video.currentTime=20;run(y);y.video.currentTime=40;assert.equal(run(y),true,'tab throttled for several seconds: crossing still detected');assert.equal(y.video.currentTime,10);
+});
+test('loopVerse: manual seek to or past the end never rewinds; seeking back inside the verse keeps looping',()=>{
+  const c=loopCtx(),run=x=>{c.x=x;return vm.runInContext('loopVerse(x)',c)},seek=x=>{c.x=x;vm.runInContext('onVerseSeek(x)',c)};
+  const x=loopTile();x.video.currentTime=15;run(x);
+  x.video.currentTime=25.05;seek(x);assert.equal(run(x),false);assert.equal(x.video.currentTime,25.05,'seek to endAt+0.05 while playing');
+  x.video.currentTime=60;seek(x);assert.equal(run(x),false);assert.equal(x.video.currentTime,60);
+  x.video.currentTime=12;seek(x);run(x);x.video.currentTime=25.2;assert.equal(run(x),true);assert.equal(x.video.currentTime,10);
+  const y=loopTile();y.video.currentTime=24;run(y);y.video.currentTime=25.1;y.video.seeking=true;assert.equal(run(y),false,'mid-seek sample ignored');
+});
+test('loopVerse does nothing when paused, without loop, without an end marker, or with no previous sample',()=>{
+  const c=loopCtx(),run=x=>{c.x=x;return vm.runInContext('loopVerse(x)',c)};
+  for(const o of [{video:Object.assign(loopTile().video,{paused:true})},{loop:false},{endAt:undefined}]){
+    const x=loopTile(o);x.video.currentTime=24;run(x);x.video.currentTime=26;assert.equal(run(x),false);assert.equal(x.video.currentTime,26);
+  }
+  const z=loopTile();z.video.currentTime=15;run(z);z.video.currentTime=30;c.syncing=true;assert.equal(run(z),false,'no wrap while syncing');c.syncing=false;
+  const w=loopTile({loopSrc:'https://cdn/old.mp4'});w.video.currentTime=15;run(w);w.video.currentTime=30;assert.equal(run(w),false,'source changed');
+  const x=loopTile();x.video.currentTime=26;assert.equal(run(x),false,'first sample after a (re)load is not a crossing');
+});
+test('onVerseEnded: the last verse restarts only after natural playback to the chapter end; paused, stopped or non-loop tiles stay put',()=>{
+  const c=loopCtx(),end=x=>{c.x=x;c.tiles=new Map([['ASL',x]]);return vm.runInContext('onVerseEnded(x)',c)};
+  let x=loopTile({endAt:undefined});x.video.paused=true;x.video.ended=true;x.video.currentTime=99;x.loopPrev=99;
+  assert.equal(end(x),true);assert.equal(x.video.plays,1);assert.equal(x.video.currentTime,10);
+  x=loopTile({shouldPlay:false,endAt:undefined});x.video.paused=true;x.video.ended=true;x.video.currentTime=99;x.loopPrev=99;
+  assert.equal(end(x),false);assert.equal(x.video.plays,0,'paused by the user (shouldPlay false): no play()');assert.equal(x.video.currentTime,99);
+  x=loopTile({loop:false,endAt:undefined});x.video.currentTime=99;x.loopPrev=99;assert.equal(end(x),false);assert.equal(x.video.plays,0);
+  x=loopTile({endAt:undefined});x.video.src='';x.loopPrev=99;assert.equal(end(x),false);assert.equal(x.video.plays,0);
+  const none=(label,f)=>{const t=loopTile({endAt:undefined});t.video.paused=true;t.video.ended=true;t.video.currentTime=99;t.loopPrev=99;c.userPaused=false;c.syncing=false;f(t);assert.equal(end(t),false,label);assert.equal(t.video.plays,0,label);assert.equal(t.video.currentTime,99,label);c.userPaused=false;c.syncing=false;};
+  none('Pause all',t=>{c.userPaused=true;});
+  none('syncing',t=>{c.syncing=true;});
+  none('source changed',t=>{t.video.src='https://cdn/other.mp4';});
+  none('load error',t=>{t.video.error={code:2};});
+  none('shown as unavailable',t=>{t.tile={classList:{contains:k=>k==='novideo'}};});
+  x=loopTile({endAt:undefined});x.video.paused=true;x.video.ended=true;x.loopPrev=99;c.tiles=new Map([['ASL',loopTile()]]);c.x=x;assert.equal(vm.runInContext('onVerseEnded(x)',c),false,'stale entry (tile removed or replaced)');assert.equal(x.video.plays,0);
+});
+test('onVerseEnded: a seek out of the verse window invalidates the loop; playback inside it still wraps',()=>{
+  const c=loopCtx(),run=x=>{c.x=x;return vm.runInContext('loopVerse(x)',c)},seek=x=>{c.x=x;vm.runInContext('onVerseSeek(x)',c)},end=x=>{c.x=x;c.tiles=new Map([['ASL',x]]);return vm.runInContext('onVerseEnded(x)',c)};
+  // chosen non-last verse: seek past the verse end, then the chapter ends: no rewind, no play
+  let x=loopTile();x.video.currentTime=15;run(x);
+  x.video.currentTime=100;seek(x);x.video.paused=true;x.video.ended=true;
+  assert.equal(end(x),false);assert.equal(x.video.plays,0,'endAt 25, seek to 100: outside the window');assert.equal(x.video.currentTime,100);
+  // seek before the verse start: also outside the window
+  x=loopTile({endAt:undefined});x.video.currentTime=5;seek(x);x.video.paused=true;x.video.ended=true;
+  assert.equal(end(x),false);assert.equal(x.video.plays,0,'last verse, seek to 5 < startAt 10');assert.equal(x.video.currentTime,5);
+  // last verse: natural playback to the chapter end wraps (the interval keeps sampling currentTime)
+  x=loopTile({endAt:undefined});x.video.currentTime=40;run(x);x.video.currentTime=99;run(x);x.video.paused=true;x.video.ended=true;
+  assert.equal(end(x),true);assert.equal(x.video.plays,1);assert.equal(x.video.currentTime,10);
+  // last verse: seek inside the window keeps the loop alive
+  x=loopTile({endAt:undefined});x.video.currentTime=50;seek(x);x.video.paused=true;x.video.ended=true;
+  assert.equal(end(x),true);assert.equal(x.video.plays,1,'seek to 50 inside [10, end) then ended');assert.equal(x.video.currentTime,10);
+  // no sample at all (e.g. source just switched): no wrap
+  x=loopTile({endAt:undefined});x.video.paused=true;x.video.ended=true;
+  assert.equal(end(x),false);assert.equal(x.video.plays,0,'no previous sample');
+  // last verse: a seek to the exact end of the video is not a natural crossing
+  x=loopTile({endAt:undefined});x.video.duration=100;x.video.currentTime=100;seek(x);x.video.paused=true;x.video.ended=true;
+  assert.equal(end(x),false);assert.equal(x.video.plays,0,'seek to duration exactly');assert.equal(x.video.currentTime,100);
+  // last verse: natural playback reaches the end with the last sample before it
+  x=loopTile({endAt:undefined});x.video.duration=100;x.video.currentTime=99;run(x);x.video.currentTime=100;x.video.paused=true;x.video.ended=true;
+  assert.equal(end(x),true);assert.equal(x.video.plays,1,'last sample before duration');assert.equal(x.video.currentTime,10);
+});
+test('verse loop wiring: events call the handlers, chosen verse sets loop, a new source resets it, Pause all clears shouldPlay',()=>{
+  assert.match(script,/video\.addEventListener\('ended', \(\) => onVerseEnded\(entry\)\)/);
+  assert.match(script,/video\.addEventListener\('seeking', \(\) => onVerseSeek\(entry\)\)/);
+  assert.match(script,/video\.addEventListener\('seeked', \(\) => onVerseSeek\(entry\)\)/);
+  assert.match(script,/loop: !!\(p\.verse && Number\.isFinite\(start\)\)/);
+  assert.match(script,/entry\.loop = !!\(item\.bibleSrc && item\.loop\)/);
+  assert.match(script,/setInterval\(\(\) => \{ for \(const x of tiles\.values\(\)\) loopVerse\(x\)/);
+  assert.equal((script.match(/entry\.loop = false/g)||[]).length,2,'a new source always resets the loop');
+  assert.match(script,/pauseAll'\)\.addEventListener\('click', \(\) => \{[^\n]*x\.shouldPlay = false/);
 });

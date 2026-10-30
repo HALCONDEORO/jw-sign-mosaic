@@ -130,7 +130,7 @@ const I18N = {
     counter: n => n + ' lenguas seleccionadas',
     loading: 'Cargando…', retrying: 'Reintentando…',
     slowMsg: 'Sigue sin cargar. Toca aquí para reintentar.',
-    bibleColl: 'Biblia: libro, capítulo y versículo', wholeChapter: 'Capítulo completo', bookLbl: 'Libro', chapLbl: 'Capítulo', verseLbl: 'Versículo', noVerseMark: 'Sin marcador de este versículo: empieza al inicio del capítulo.',
+    bibleColl: 'Biblia: libro, capítulo y versículo', wholeChapter: 'Capítulo completo', bookLbl: 'Libro', chapLbl: 'Capítulo', verseLbl: 'Versículo',
     noEquiv: 'Esta publicación no está disponible en esta lengua.',
     loadErr: e => 'Error al cargar (' + e + ')',
     failMsg: 'No se pudo cargar el vídeo. Toca aquí o usa Reintentar fallidas.',
@@ -167,7 +167,7 @@ const I18N = {
     counter: n => n + ' languages selected',
     loading: 'Loading…', retrying: 'Retrying…',
     slowMsg: 'Still not loading. Tap here to retry.',
-    bibleColl: 'Bible: book, chapter and verse', wholeChapter: 'Whole chapter', bookLbl: 'Book', chapLbl: 'Chapter', verseLbl: 'Verse', noVerseMark: 'No marker for this verse: starts at the beginning of the chapter.',
+    bibleColl: 'Bible: book, chapter and verse', wholeChapter: 'Whole chapter', bookLbl: 'Book', chapLbl: 'Chapter', verseLbl: 'Verse',
     noEquiv: 'This publication is not available in this language.',
     loadErr: e => 'Load error (' + e + ')',
     failMsg: 'The video failed to load. Tap here or use Retry failed.',
@@ -368,6 +368,33 @@ function parseBibleKey(k) {
 function bibleLabel(p) { return BIBLE_NAMES[LANG][p.book - 1] + ' ' + p.chapter + (p.verse ? ':' + p.verse : ''); }
 function timeToSec(s) { const m = /^(\d+):(\d{2}):(\d{2}(?:\.\d+)?)$/.exec(String(s || '')); return m ? (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]) : NaN; }
 let BIBLE_TIMEOUT = 25000; // a hung request becomes a retriable failure
+// A chosen verse plays only itself and repeats: it ends where the next verse marker starts (the last verse ends with the chapter).
+function verseEnd(verses, start) {
+  let e = Infinity;
+  for (const sec of verses.values()) if (sec > start && sec < e) e = sec;
+  return e === Infinity ? undefined : e;
+}
+// Wrap only on a real crossing of endAt while playing: the previous sample was before the end and this one is at or after it.
+// A manual seek re-bases the previous sample (see onVerseSeek), so seeking to or past the end never rewinds.
+function loopVerse(x) { // true when the tile wrapped back to the start of its verse
+  const v = x.video, prev = x.loopPrev, cur = v.currentTime;
+  x.loopPrev = cur;
+  if (!x.loop || !Number.isFinite(x.startAt) || !Number.isFinite(x.endAt) || v.paused || v.ended || v.seeking || syncing || v.src !== x.loopSrc) return false;
+  if (Number.isFinite(prev) && prev < x.endAt && cur >= x.endAt) { v.currentTime = x.startAt; x.loopPrev = x.startAt; return true; }
+  return false;
+}
+function onVerseSeek(x) { x.loopPrev = x.video.currentTime; } // a seek is not a crossing
+function onVerseEnded(x) { // the last verse runs to the chapter end: restart it only when playback reached the end naturally from inside the verse
+  if (!x.loop || !Number.isFinite(x.startAt) || !x.shouldPlay || userPaused || syncing) return false;
+  if (tiles.get(x.code) !== x || !x.video.src || x.video.src !== x.loopSrc || x.video.error || x.tile.classList.contains('novideo')) return false;
+  // A seek re-bases the last sample (onVerseSeek): only a sample inside the verse window may wrap, so a seek out of the verse invalidates the loop.
+  const prev = x.loopPrev, dur = x.video.duration;
+  if (!Number.isFinite(prev) || prev < x.startAt || (Number.isFinite(x.endAt) && prev >= x.endAt)) return false;
+  if (Number.isFinite(dur) && prev >= dur) return false; // a seek to the very end of the chapter is not a natural crossing
+  x.video.currentTime = x.startAt; x.loopPrev = x.startAt;
+  x.video.play().catch(() => {});
+  return true;
+}
 const bibleCache = new Map();
 // -> { state: 'ok' | 'none' | 'failed', src, duration, verses: Map verse -> seconds }. 'none' only when the API answers that this language has no such chapter.
 function fetchBibleChapter(code, book, chapter) {
@@ -600,7 +627,7 @@ async function loadTileProgram(entry, item) {
   entry.shouldPlay = false; // a new source always loads paused
   if (item) entry.want = '';
   tile.classList.remove('indet');
-  entry.startAt = undefined; entry.note.textContent = '';
+  entry.startAt = undefined; entry.endAt = undefined; entry.loop = false; entry.note.textContent = '';
   if (!item) {
     tile.classList.add('novideo');
     video.pause(); video.removeAttribute('src'); video.load();
@@ -612,10 +639,10 @@ async function loadTileProgram(entry, item) {
   try {
     const src = item.bibleSrc || pickFile(item.media || {});
     entry.startAt = item.bibleSrc ? item.startAt : undefined; // Bible passages open at their verse; other videos at the start
-    entry.note.textContent = item.verseNote ? t('noVerseMark') : '';
+    entry.endAt = item.bibleSrc ? item.endAt : undefined; entry.loop = !!(item.bibleSrc && item.loop); // a chosen verse repeats instead of running on
     if (src) {
       setStatus(entry, 'loading');
-      video.src = src; video.load(); // load paused; playback starts only from Play all / Sync
+      video.src = src; entry.loopSrc = video.src; video.load(); // load paused; playback starts only from Play all / Sync
       if (entry.armWatchdog) entry.armWatchdog();
     } else { setStatus(entry, 'noMp4', undefined, true); }
   } catch (e) { setStatus(entry, 'loadErr', e.message, true); }
@@ -630,7 +657,7 @@ async function fillBible(entry, key, listOnly) {
   // Asking for a passage invalidates the old one at once, not when the answer arrives: the old video stops, no retry or
   // auto-resume can bring it back, and the request is kept for Retry and the saved state even if the network hangs.
   cancelRetry(entry);
-  entry.shouldPlay = false; entry.startAt = undefined; entry.note.textContent = '';
+  entry.shouldPlay = false; entry.startAt = undefined; entry.endAt = undefined; entry.loop = false; entry.note.textContent = '';
   entry.video.pause(); entry.video.removeAttribute('src'); entry.video.load();
   entry.items = []; entry.partial = false; entry.sel.classList.remove('partial'); entry.sel.title = '';
   entry.prog = ''; entry.want = key;
@@ -650,7 +677,8 @@ async function fillBible(entry, key, listOnly) {
   }
   if (r.state === 'none') { markUnavailable(entry, key); return; } // this language has no such chapter: black cell, never another passage
   const start = p.verse ? r.verses.get(p.verse) : 0;
-  const item = { naturalKey: key, title: bibleLabel(p), group: '', media: null, bibleSrc: r.src, startAt: Number.isFinite(start) ? start : 0, verseNote: !!(p.verse && !Number.isFinite(start)) };
+  if (p.verse && !Number.isFinite(start)) { markUnavailable(entry, key); return; } // this language has no marker for that verse: black cell, never the chapter from its start
+  const item = { naturalKey: key, title: bibleLabel(p), group: '', media: null, bibleSrc: r.src, startAt: Number.isFinite(start) ? start : 0, endAt: Number.isFinite(start) ? verseEnd(r.verses, start) : undefined, loop: !!(p.verse && Number.isFinite(start)) };
   entry.items = [item];
   entry.sel.selectedIndex = 0;
   await loadTileProgram(entry, item);
@@ -746,6 +774,9 @@ async function addTile(lang) {
   const loaded = () => { clearTimeout(loadTimer); status.style.display = 'none'; updateRetryUI(); sortTiles(); };
   video.addEventListener('playing', loaded);
   video.addEventListener('loadedmetadata', () => { if (entry.startAt > 0 && Number.isFinite(video.duration) && entry.startAt < video.duration) video.currentTime = entry.startAt; }); // Bible verse start
+  video.addEventListener('ended', () => onVerseEnded(entry)); // last verse: chapter end
+  video.addEventListener('seeking', () => onVerseSeek(entry));
+  video.addEventListener('seeked', () => onVerseSeek(entry));
   video.addEventListener('loadeddata', loaded); // first frame ready: the tile is loaded and waits paused
   let retried = false;
   video.addEventListener('error', () => {
@@ -1111,7 +1142,6 @@ function setLang(l) {
     }
     x.sel.title = x.partial ? t('partialTip') : '';
     x.nomsg.textContent = t('naText');
-    if (x.note.textContent) x.note.textContent = t('noVerseMark');
     x.tile.querySelector('.audio').title = t('audioTip');
     x.tile.querySelector('.audio').setAttribute('aria-label', t('audioTip'));
     x.tile.querySelector('.fs').title = t('fsTip');
@@ -1155,6 +1185,7 @@ function autoResume() {
   }
 }
 setInterval(autoResume, 15000);
+setInterval(() => { for (const x of tiles.values()) loopVerse(x); }, 100); // verse loop: wrap at the next verse marker
 
 (async function init() {
   applyI18n();
