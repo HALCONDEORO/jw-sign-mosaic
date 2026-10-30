@@ -4,7 +4,7 @@ The mosaic plays the same video in any sign language published on jw.org. This p
 
 ## The catalogue
 
-The language list comes from the official jw.org catalogue API (`/mediator/v1/languages/E/all`). At the time of writing it offers about 110 sign languages out of more than a thousand spoken and written languages. The page reads the live catalogue every time it loads; nothing is bundled into the repository, so new sign languages appear in the "Add language" panel as soon as jw.org publishes them.
+The language list comes from the official jw.org catalogue API (`/mediator/v1/languages/E/all`). At the time of writing it offers about 110 sign languages out of more than a thousand spoken and written languages. The page reads the live catalogue every time it loads, so new sign languages appear in the "Add language" panel as soon as jw.org publishes them; the repository ships no copy of the catalogue (only the eight default language codes and the built-in section list live in the code, and the publication listings are fetched live as well).
 
 Each language has a short code (LSE for Spanish Sign Language, ASL for American Sign Language, and so on). The search box in the "Add language" panel matches both the language name and its code.
 
@@ -27,7 +27,7 @@ Your own selection replaces the defaults as soon as you add or remove a language
 
 ## Not every video exists in every language
 
-The jw.org catalogue is much larger in ASL or LSE than in a language with a recent sign-language translation. When you apply a program to all tiles, each language is matched by the program's language-agnostic key:
+How much of the jw.org catalogue exists in sign language varies by language and by publication. When you apply a program to all tiles, each language is matched by the program's language-agnostic key:
 
 - If the program exists in that language, the tile loads it.
 - If it does not, the tile shows the black "Not available in this language" cell. The page never substitutes a different video, a different program, or another language.
@@ -36,7 +36,7 @@ The same strict rule applies to Bible chapters and to verse markers (see the usa
 
 ## Video quality
 
-The player prefers the 240p MP4 rendition of each video. Twenty tiles at 240p are far easier on memory, battery and data than twenty HD streams, and sign language stays perfectly readable at that size. Fullscreening a tile still shows the same rendition.
+The player prefers the 240p MP4 rendition of each video, which keeps memory, battery and data use per stream far lower than HD. Readability at that size depends on the video, your screen and the viewing distance; fullscreening a tile shows the same rendition, so for a closer look, watch a single tile.
 
 ## Interface language vs video languages
 
