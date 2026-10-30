@@ -28,3 +28,9 @@ test('no picker truncates the 163-song meeting catalog',()=>{
   assert.doesNotMatch(script,/slice\(0,\s*(100|120|200)\)/,'no hard cuts below the full SJJ catalog (163 videos)');
   assert.match(script,/for \(const it of items\)/,'pickers iterate the full collection');
 });
+test('missing translation is reported, never substituted',()=>{
+  assert.match(script,/function markUnavailable\(/);
+  assert.match(script,/else markUnavailable\(x\)/,'global apply marks unmatched tiles instead of keeping a different video');
+  assert.match(script,/deferLoad/,'fillPrograms can skip the implicit items[0] fallback');
+  assert.match(script,/!!lang\.prog\)/,'restoring a saved selection is strict too');
+});
