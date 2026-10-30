@@ -556,6 +556,574 @@ async function startTogether() {
 const VOL_KEY = 'jwSignMosaic.vol';
 function clampVolume(x) { const n = Number(x); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1; }
 const savedVol = readStored(VOL_KEY);
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Watch jw.org sign-language video publications in several sign languages at once, streamed directly from the official CDN.">
+<meta name="theme-color" content="#0d1117">
+<title>Mosaico de Lenguas de Signos</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  header { padding:14px 18px 10px; border-bottom:1px solid var(--border); }
+  h1 { margin:0 0 2px; font-size:20px; font-weight:600; }
+  .sub { color:var(--muted); font-size:13px; }
+  .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 18px; border-bottom:1px solid var(--border); }
+  button, select, input { background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:14px; }
+  button { cursor:pointer; }
+  button:hover, select:hover { border-color:var(--accent); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  button.primary { background:#1f6feb; border-color:#1f6feb; color:#fff; font-weight:600; }
+  .langswitch { flex-shrink:0; }
+  .langswitch button { padding:4px 9px; font-size:13px; }
+  .langswitch button.active { background:#1f6feb; border-color:#1f6feb; color:#fff; font-weight:600; }
+  #grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:10px; padding:12px; }
+  .tile { background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden; display:flex; flex-direction:column; }
+  .tile:fullscreen { border-radius:0; }
+  .tile:fullscreen video { flex:1; height:auto; }
+  .tile-head { display:flex; align-items:center; gap:6px; padding:6px 8px; }
+  .tile-head .lang { font-weight:600; font-size:13px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tile-head button { padding:3px 7px; font-size:13px; }
+  .tile select.programs { margin:0 8px 6px; font-size:12px; max-width:calc(100% - 16px); }
+  .videowrap { position:relative; background:#000; }
+  video { display:block; width:100%; aspect-ratio:16/9; }
+  .status { padding:10px; color:var(--muted); font-size:13px; }
+  .status.err { color:#f85149; }
+  .tile.novideo { opacity:.8; }
+  .tile select.partial { border-color:#d29922; }
+  .nomsg { display:none; }
+  .tile.novideo video { display:none; }
+  .tile.novideo .nomsg { display:flex; aspect-ratio:16/9; align-items:center; justify-content:center; text-align:center; padding:12px; background:#000; color:#e6edf3; font-weight:600; font-size:15px; }
+  .tile.indet .nomsg { visibility:hidden; }
+  .tile.novideo .status:not(.err) { display:none !important; }
+  .tile.novideo .status { color:var(--muted); font-style:italic; }
+  footer { padding:12px 18px; color:var(--muted); font-size:12px; border-top:1px solid var(--border); }
+  .addwrap { position:relative; }
+  #addPanel { position:absolute; right:0; top:calc(100% + 4px); width:320px; max-height:320px; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.5); z-index:20; }
+  #addPanel[hidden] { display:none; }
+  .controls { position:relative; }
+  .addwrap { position:static; }
+  #addPanel { right:18px; width:min(320px, calc(100% - 36px)); }
+  #addSearch { margin:8px; }
+  #addList { overflow-y:auto; }
+  #addList button { display:block; width:100%; text-align:left; border:0; border-radius:0; background:none; padding:7px 10px; font-size:13px; }
+  #addList button:hover { background:#21262d; }
+  #addList button.added { color:var(--muted); }
+  .counter { color:var(--muted); font-size:13px; }
+  .tile .note { font-size:12px; color:var(--muted); padding:0 8px 6px; }
+  .globrow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:8px 18px; border-bottom:1px solid var(--border); background:#0a0d12; font-size:13px; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <h1 id="tTitle" style="flex:1">Mosaico de Lenguas de Signos</h1>
+    <div class="langswitch">
+      <button id="langES">ES</button>
+      <button id="langEN">EN</button>
+    </div>
+  </div>
+  <div class="sub" id="tSub">JW Broadcasting y otras publicaciones con vídeo en lenguas de signos, varias a la vez. Vídeo en directo desde jw.org.</div>
+</header>
+<div class="controls">
+  <button class="primary" id="playAll">▶</button>
+  <button id="pauseAll">⏸</button>
+  <button id="syncAll">⟳</button>
+  <span class="counter" id="counter" aria-live="polite"></span>
+  <span class="counter" id="notice" role="status"></span>
+  <label class="counter" for="vol" id="tVol"></label>
+  <input id="vol" type="range" min="0" max="1" step="0.05" value="1" style="width:110px;padding:0">
+  <button id="addAll"></button>
+  <button id="stopAdd" hidden></button>
+  <button id="retryFailed" hidden></button>
+  <button id="rmAll"></button>
+  <button id="shareBtn"></button>
+  <span id="addProgress" role="status"></span>
+  <span style="flex:1"></span>
+  <div class="addwrap">
+    <button id="addBtn" aria-expanded="false" aria-controls="addPanel">＋</button>
+    <div id="addPanel" hidden>
+      <input id="addSearch" type="search" autocomplete="off" aria-label="Search language">
+      <div id="addList" role="listbox" aria-label="Sign languages"></div>
+    </div>
+  </div>
+</div>
+<div class="globrow">
+  <span id="tForAll">Para todas:</span>
+  <select id="globColl" aria-label="Section for all tiles"></select>
+  <select id="globProg" aria-label="Publication for all tiles"></select>
+  <select id="gBook" hidden></select>
+  <select id="gChap" hidden></select>
+  <select id="gVerse" hidden></select>
+  <button id="globApply"></button>
+</div>
+<div class="globrow" id="jumpRow">
+  <span id="tJump"></span>
+  <input id="jumpSlider" type="range" min="0" max="1000" value="0" style="flex:1;min-width:140px;padding:0" aria-label="Position">
+  <span id="jumpPct" style="min-width:3.5em">0%</span>
+  <button id="back10"></button>
+  <button id="fwd10"></button>
+</div>
+<p id="capacityNote" style="margin:10px 18px;color:var(--muted);font-size:13px"></p>
+<div id="grid"></div>
+<footer id="tFooter"></footer>
+<script>
+'use strict';
+const API = 'https://data.jw-api.org/mediator/v1';
+// No fixed tile limit. Device capacity, media availability and bandwidth still apply.
+let addingAll = false;
+let stopAddingAll = false;
+let mosaicGen = 0; // bumped by Remove all: an Add-all loop or a pending load that started earlier must not add or revive tiles
+const I18N = {
+  es: {
+    title: 'Mosaico de Lenguas de Signos', htmlLang: 'es',
+    sub: 'JW Broadcasting y otras publicaciones con vídeo en lenguas de signos, varias a la vez. Vídeo en directo desde jw.org.',
+    playAll: '▶ Reproducir todos', pauseAll: '⏸ Pausar todos', syncAll: '⟳ Sincronizar',
+    addBtn: '＋ Añadir lengua…', searchPh: 'Buscar lengua (nombre o código)…', noResults: 'Sin resultados.',
+    collLbl: 'Sección', progLbl: 'Publicación', globCollLbl: 'Sección para todas', globProgLbl: 'Publicación para todas',
+    forAll: 'Para todas:', applyAll: 'Aplicar a todas',
+    counter: n => n + ' lenguas seleccionadas',
+    loading: 'Cargando…', retrying: 'Reintentando…',
+    slowMsg: 'Sigue sin cargar. Toca aquí para reintentar.',
+    bibleColl: 'Biblia: libro, capítulo y versículo', wholeChapter: 'Capítulo completo', bookLbl: 'Libro', chapLbl: 'Capítulo', verseLbl: 'Versículo',
+    noEquiv: 'Esta publicación no está disponible en esta lengua.',
+    loadErr: e => 'Error al cargar (' + e + ')',
+    failMsg: 'No se pudo cargar el vídeo. Toca aquí o usa Reintentar fallidas.',
+    noVideoPub: 'Sin vídeo de esta publicación en esta lengua.',
+    noMp4: 'Sin MP4 compatible.',
+    addAll: 'Añadir todas las lenguas del catálogo…', stopAdd: 'Detener adición',
+    confirmAll: n => 'Añadir ' + n + ' lenguas de signos más, una a una, manteniendo la publicación actual. No todas tendrán este vídeo. Muchas reproducciones pueden agotar la memoria, la batería o los datos. No se garantiza que tu dispositivo pueda reproducirlas todas. ¿Continuar?',
+    adding: (n, total) => 'Añadiendo ' + n + ' de ' + total + '…',
+    emptyCatalog: 'Catálogo no disponible. Puedes conservar tus lenguas guardadas e intentarlo más tarde.',
+    allAdded: 'Todas las lenguas del catálogo ya están añadidas.',
+    addedSummary: (n, stopped) => (stopped ? 'Adición detenida. ' : 'Adición terminada. ') + n + ' lenguas añadidas.',
+    capacity: 'Empieza con las ocho habituales y añade más. Sin límite fijo; la capacidad real depende de tu dispositivo y de la conexión.',
+    audioTip: 'Escuchar esta lengua', fsTip: 'Pantalla completa', rmTip: 'Quitar',
+    langListLbl: 'Lenguas de signos', langEsTip: 'Cambiar a español', langEnTip: 'Cambiar a inglés',
+    rmAll: '✕ Quitar todas', confirmRmAll: 'Quitar todas las lenguas del mosaico. Los vídeos se detendrán. ¿Continuar?',
+    syncing: 'Empezando todas a la vez…',
+    syncSkipped: n => n + ' sin cargar aún; pulsa Sincronizar cuando estén listas.',
+    volLbl: 'Volumen',
+    shareBtn: '🔗 Copiar enlace', shareCopied: 'Enlace copiado.', sharePrompt: 'Copia este enlace:',
+    jumpLbl: 'Saltar todas a la misma posición:', back10: '−10 s', fwd10: '+10 s', posLbl: 'Posición',
+    retryFailed: n => '↻ Reintentar fallidas (' + n + ')',
+    partialTip: 'La lista de publicaciones está incompleta. Usa Reintentar fallidas.',
+    listIncomplete: 'La lista está incompleta y no se encontró la publicación elegida. Toca aquí o usa Reintentar fallidas.',
+    naText: 'No disponible en esta lengua',
+    footer: 'Vídeos servidos directamente desde los servidores de jw.org (API pública y CDN). Herramienta personal, sin afiliación ni respaldo oficial. La reproducción simultánea depende de la disponibilidad del vídeo y de tu dispositivo.'
+  },
+  en: {
+    title: 'Sign Language Mosaic', htmlLang: 'en',
+    sub: 'JW Broadcasting and other sign-language video publications, several at once. Streamed live from jw.org.',
+    playAll: '▶ Play all', pauseAll: '⏸ Pause all', syncAll: '⟳ Sync',
+    addBtn: '＋ Add language…', searchPh: 'Search language (name or code)…', noResults: 'No results.',
+    collLbl: 'Section', progLbl: 'Publication', globCollLbl: 'Section for all tiles', globProgLbl: 'Publication for all tiles',
+    forAll: 'For all:', applyAll: 'Apply to all',
+    counter: n => n + ' languages selected',
+    loading: 'Loading…', retrying: 'Retrying…',
+    slowMsg: 'Still not loading. Tap here to retry.',
+    bibleColl: 'Bible: book, chapter and verse', wholeChapter: 'Whole chapter', bookLbl: 'Book', chapLbl: 'Chapter', verseLbl: 'Verse',
+    noEquiv: 'This publication is not available in this language.',
+    loadErr: e => 'Load error (' + e + ')',
+    failMsg: 'The video failed to load. Tap here or use Retry failed.',
+    noVideoPub: 'No video of this publication in this language.',
+    noMp4: 'No compatible MP4.',
+    addAll: 'Add all catalogue languages…', stopAdd: 'Stop adding',
+    confirmAll: n => 'Add ' + n + ' more sign languages, one at a time, keeping the current publication. This video may not exist in every language. Many streams may exhaust memory, battery or data. Your device is not guaranteed to play them all. Continue?',
+    adding: (n, total) => 'Adding ' + n + ' of ' + total + '…',
+    emptyCatalog: 'Catalogue unavailable. Keep your saved languages and try again later.',
+    allAdded: 'All catalogue languages have already been added.',
+    addedSummary: (n, stopped) => (stopped ? 'Stopped adding. ' : 'Finished adding. ') + n + ' languages added.',
+    capacity: 'Start with the usual eight and add more. No fixed limit; actual capacity depends on your device and connection.',
+    audioTip: 'Listen to this language', fsTip: 'Fullscreen', rmTip: 'Remove',
+    langListLbl: 'Sign languages', langEsTip: 'Switch to Spanish', langEnTip: 'Switch to English',
+    rmAll: '✕ Remove all', confirmRmAll: 'Remove every language from the mosaic. Playback will stop. Continue?',
+    syncing: 'Starting all together…',
+    syncSkipped: n => n + ' not loaded yet; press Sync when they are ready.',
+    volLbl: 'Volume',
+    shareBtn: '🔗 Copy link', shareCopied: 'Link copied.', sharePrompt: 'Copy this link:',
+    jumpLbl: 'Jump all to the same position:', back10: '−10 s', fwd10: '+10 s', posLbl: 'Position',
+    retryFailed: n => '↻ Retry failed (' + n + ')',
+    partialTip: 'The publication list is incomplete. Use Retry failed.',
+    listIncomplete: 'The list is incomplete and the chosen publication was not found. Tap here or use Retry failed.',
+    naText: 'Not available in this language',
+    footer: 'Videos served directly from jw.org servers (public API and CDN). Personal tool, not affiliated or endorsed. Simultaneous playback depends on video availability and your device.'
+  }
+};
+// Storage is optional: blocked access or a full quota must not stop playback.
+function readStored(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+function writeStored(key, value) {
+  try { localStorage.setItem(key, value); return true; } catch (e) { return false; }
+}
+let LANG = (readStored('jwSignMosaic.lang') || (navigator.language || 'es')).toLowerCase().startsWith('en') ? 'en' : 'es';
+const t = k => I18N[LANG][k];
+
+const DEFAULT_CODES = ['LSE','ASL','BSL','LSB','LSM','LSF','ISL','DGS'];
+const LS_KEY = 'jwSignMosaic.v2';
+function collectionsFor() { return [
+  ['StudioMonthlyPrograms', 'JW Broadcasting'],
+  ['VODStudio', LANG === 'es' ? 'JW Broadcasting (archivo)' : 'JW Broadcasting (archive)'],
+  ['VODProgramsEvents', LANG === 'es' ? 'Programas espirituales' : 'Spiritual programs'],
+  ['VODMusicVideos', LANG === 'es' ? 'Música' : 'Music'],
+  ['VODSeries', LANG === 'es' ? 'Series' : 'Series'],
+  ['VODChildren', LANG === 'es' ? 'Niños' : 'Children'],
+  ['VODTeenagers', LANG === 'es' ? 'Jóvenes' : 'Teenagers'],
+  ['VODFamily', LANG === 'es' ? 'Familia' : 'Family'],
+  ['VODMinistry', LANG === 'es' ? 'Reuniones y ministerio' : 'Meetings and ministry'],
+  ['VODMinistryTools', LANG === 'es' ? 'Ayudas para la predicación' : 'Ministry tools'],
+  ['VODOurActivities', LANG === 'es' ? 'Qué hacemos' : 'What we do'],
+  ['VODOurOrganization', LANG === 'es' ? 'Nuestra organización' : 'Our organization'],
+  ['VODBible', LANG === 'es' ? 'La Biblia' : 'The Bible'],
+  ['BIBLE', t('bibleColl')],
+  ['VODMovies', LANG === 'es' ? 'Producciones audiovisuales' : 'Movies'],
+  ['VODIntExp', LANG === 'es' ? 'Entrevistas y experiencias' : 'Interviews and experiences'],
+]; }
+const grid = document.getElementById('grid');
+const tiles = new Map(); // code -> entry
+let ALL_SIGN_LANGS = [];
+
+// The publication the user chose for the whole mosaic. New tiles use it strictly, so a tile never falls back to "the first video".
+let SEL = { coll: '', key: '' };
+function sanitizeSel(s) {
+  const ok = s && typeof s.coll === 'string' && typeof s.key === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(s.key) && /^[A-Za-z0-9]{1,40}$/.test(s.coll);
+  return ok ? { coll: s.coll, key: s.key } : { coll: '', key: '' };
+}
+function loadState() {
+  try {
+    const saved = JSON.parse(readStored(LS_KEY) || 'null');
+    if (saved && Array.isArray(saved.langs) && saved.langs.length) return saved;
+  } catch (e) {}
+  try { // migration from v1
+    const old = JSON.parse(readStored('jwSignMosaic.langs.v1') || 'null');
+    if (Array.isArray(old) && old.length) return { langs: old };
+  } catch (e) {}
+  return { langs: DEFAULT_CODES.map(c => ({ code: c })) };
+}
+function saveState() {
+  // want = the publication a tile was asked for but could not show; without it a reload would load the first video
+  const langs = [...tiles.values()].map(x => ({ code: x.code, coll: x.coll, prog: x.prog, want: x.want || '' }));
+  writeStored(LS_KEY, JSON.stringify({ langs, sel: SEL }));
+}
+function updateCounter() { document.getElementById('counter').textContent = t('counter')(tiles.size); }
+function tileGroup(x) { // 0 = loads fine, 1 = load error (retriable), 2 = no video in this language
+  if (x.status && x.status.style.display !== 'none' && x.status.classList.contains('err') && x.statusKey !== 'slowMsg') return 1;
+  return x.tile.classList.contains('novideo') ? 2 : 0;
+}
+function sortTiles() { // good tiles first, then load errors, then unavailable; stable inside each group, keeps playback
+  const groups = [[], [], []];
+  for (const x of tiles.values()) groups[tileGroup(x)].push(x);
+  const order = [].concat(...groups);
+  if (grid.children) { // already in order: touch nothing, so nothing jumps
+    const cur = [...grid.children];
+    if (cur.length === order.length && order.every((x, i) => cur[i] === x.tile)) return;
+  }
+  for (const x of order) grid.appendChild(x.tile); // moves the node, videos keep playing
+}
+
+function setStatus(entry, key, arg, isErr) { // every visible status comes from the active dictionary
+  entry.statusKey = key; entry.statusArg = arg;
+  entry.status.style.display = '';
+  entry.status.classList.toggle('err', !!isErr);
+  const v = t(key);
+  entry.status.textContent = (typeof v === 'function') ? v(arg) : v;
+  updateRetryUI(); sortTiles();
+}
+function statusFailed(x) { return x.status.style.display !== 'none' && x.status.classList.contains('err'); }
+function isFailed(x) { return !!x.partial || statusFailed(x); }
+function updateRetryUI() {
+  const btn = document.getElementById('retryFailed');
+  const n = [...tiles.values()].filter(isFailed).length;
+  btn.hidden = !n;
+  if (n) btn.textContent = t('retryFailed')(n);
+}
+function cancelRetry(x) { clearTimeout(x.retryTimer); x.retryTimer = null; }
+function scheduleRetry(x, ms) { // one automatic reload of a failed source; dropped when the tile is removed or its source changes
+  const src = x.video.src;
+  cancelRetry(x);
+  x.retryTimer = setTimeout(() => {
+    x.retryTimer = null;
+    if (tiles.get(x.code) !== x || x.video.src !== src) return; // removed, or another source was chosen meanwhile
+    x.video.src = src; x.video.load(); if (x.armWatchdog) x.armWatchdog();
+  }, ms);
+}
+async function retryEntry(x) {
+  if (tiles.get(x.code) !== x) return; // removed while queued
+  const failedVideo = statusFailed(x);
+  if (x.partial && (!failedVideo || x.video.src)) await fillPrograms(x, x.prog, false, false, true); // incomplete list: refetch it without touching the playing video
+  if (!failedVideo) return;
+  if (x.resetRetry) x.resetRetry();
+  x.syncSkipSrc = ''; // a valid retry may resume this tile
+  if (x.video.src) { // the file is known: just reload it
+    x.shouldPlay = false; // a retried tile reloads paused; Play all or Sync starts it with the others
+    setStatus(x, 'loading'); x.video.load(); if (x.armWatchdog) x.armWatchdog();
+  } else { // the listing never arrived: fetch it again, keeping the chosen publication
+    setStatus(x, 'loading');
+    await fillPrograms(x, x.prog || x.want, !!(x.prog || x.want));
+  }
+}
+async function retryFailed() {
+  const queue = [...tiles.values()].filter(isFailed);
+  const worker = async () => { while (queue.length) await retryEntry(queue.shift()); };
+  await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker)); // only the failed tiles, 4 at a time
+  updateRetryUI();
+}
+function labelFor(code) {
+  const l = ALL_SIGN_LANGS.find(x => x.code === code);
+  return l ? l.name + ' (' + l.code + ')' : code;
+}
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+// Returns [{naturalKey,title,group,media,agnostic}] flattening one subcategory level.
+async function fetchCollection(code, collKey) {
+  const out = [];
+  try {
+    const d = await fetchJSON(`${API}/categories/${code}/${collKey}?detailed=1&clientType=www`);
+    const cat = d.category || {};
+    const own = (cat.media || []).filter(m => m.type === 'video');
+    for (const m of own) out.push({ naturalKey: m.naturalKey, title: m.title, group: '', media: m, agnostic: m.languageAgnosticNaturalKey });
+    for (const sub of (cat.subcategories || [])) {
+      const media = sub.media || [];
+      if (media.length) {
+        for (const m of media.filter(x => x.type === 'video')) out.push({ naturalKey: m.naturalKey, title: m.title, group: sub.name || sub.key, media: m, agnostic: m.languageAgnosticNaturalKey });
+      } else if (sub.key && sub.key !== collKey) {
+        try {
+          const sd = await fetchJSON(`${API}/categories/${code}/${sub.key}?detailed=1&clientType=www`);
+          const scat = sd.category || {};
+          for (const m of (scat.media || []).filter(x => x.type === 'video')) {
+            out.push({ naturalKey: m.naturalKey, title: m.title, group: sub.name || sub.key, media: m, agnostic: m.languageAgnosticNaturalKey });
+          }
+        } catch (e) { out.partial = true; } // this subcategory failed: keep what we have and let the user retry
+      }
+    }
+  } catch (e) { out.failed = true; } // request failed: different from a catalogue that is genuinely empty
+  return out;
+}
+
+// ---- Bible passage (book, chapter, verse) -----------------------------------------------------------
+// The sign-language Bible is not in the mediator listings: it comes from the pub-media API, one video per chapter, with verse markers.
+// Names and chapter counts were checked against that API (66 books, 1189 chapters).
+const PUBMEDIA = 'https://b.jw-cdn.org/apis/pub-media/GETPUBMEDIALINKS?output=json&pub=nwt&fileformat=MP4&alllangs=0';
+const BIBLE_NAMES = {"en": ["Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs", "Ecclesiastes", "Song of Solomon (Canticles)", "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi", "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians", "1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"], "es": ["Génesis", "Éxodo", "Levítico", "Números", "Deuteronomio", "Josué", "Jueces", "Rut", "1 Samuel", "2 Samuel", "1 Reyes", "2 Reyes", "1 Crónicas", "2 Crónicas", "Esdras", "Nehemías", "Ester", "Job", "Salmos", "Proverbios", "Eclesiastés", "El Cantar de los Cantares", "Isaías", "Jeremías", "Lamentaciones", "Ezequiel", "Daniel", "Oseas", "Joel", "Amós", "Abdías", "Jonás", "Miqueas", "Nahúm", "Habacuc", "Sofonías", "Ageo", "Zacarías", "Malaquías", "Mateo", "Marcos", "Lucas", "Juan", "Hechos", "Romanos", "1 Corintios", "2 Corintios", "Gálatas", "Efesios", "Filipenses", "Colosenses", "1 Tesalonicenses", "2 Tesalonicenses", "1 Timoteo", "2 Timoteo", "Tito", "Filemón", "Hebreos", "Santiago", "1 Pedro", "2 Pedro", "1 Juan", "2 Juan", "3 Juan", "Judas", "Revelación (Apocalipsis)"]};
+const BIBLE_CHAPTERS = [50, 40, 27, 36, 34, 24, 21, 4, 31, 24, 22, 25, 29, 36, 10, 13, 10, 42, 150, 31, 12, 8, 66, 52, 5, 48, 12, 14, 3, 9, 1, 4, 7, 3, 3, 3, 2, 14, 4, 28, 16, 24, 21, 28, 16, 16, 13, 6, 6, 4, 4, 5, 3, 6, 4, 3, 1, 13, 5, 5, 3, 5, 1, 1, 1, 22];
+function bibleKey(b, c, v) { return 'bible_' + b + '_' + c + (v ? '_' + v : ''); }
+function parseBibleKey(k) {
+  const m = /^bible_(\d{1,2})_(\d{1,3})(?:_(\d{1,3}))?$/.exec(String(k || ''));
+  if (!m) return null;
+  const book = +m[1], chapter = +m[2], verse = m[3] ? +m[3] : 0;
+  if (book < 1 || book > 66 || chapter < 1 || chapter > BIBLE_CHAPTERS[book - 1]) return null;
+  return { book, chapter, verse };
+}
+function bibleLabel(p) { return BIBLE_NAMES[LANG][p.book - 1] + ' ' + p.chapter + (p.verse ? ':' + p.verse : ''); }
+function timeToSec(s) { const m = /^(\d+):(\d{2}):(\d{2}(?:\.\d+)?)$/.exec(String(s || '')); return m ? (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]) : NaN; }
+let BIBLE_TIMEOUT = 25000; // a hung request becomes a retriable failure
+// A chosen verse plays only itself and repeats: it ends where the next verse marker starts (the last verse ends with the chapter).
+function verseEnd(verses, start) {
+  let e = Infinity;
+  for (const sec of verses.values()) if (sec > start && sec < e) e = sec;
+  return e === Infinity ? undefined : e;
+}
+// Wrap only on a real crossing of endAt while playing: the previous sample was before the end and this one is at or after it.
+// A manual seek re-bases the previous sample (see onVerseSeek), so seeking to or past the end never rewinds.
+function loopVerse(x) { // true when the tile wrapped back to the start of its verse
+  const v = x.video, prev = x.loopPrev, cur = v.currentTime;
+  x.loopPrev = cur;
+  if (!x.loop || !Number.isFinite(x.startAt) || !Number.isFinite(x.endAt) || v.paused || v.ended || v.seeking || syncing || v.src !== x.loopSrc) return false;
+  if (Number.isFinite(prev) && prev < x.endAt && cur >= x.endAt) { v.currentTime = x.startAt; x.loopPrev = x.startAt; return true; }
+  return false;
+}
+function onVerseSeek(x) { x.loopPrev = x.video.currentTime; } // a seek is not a crossing
+function onVerseEnded(x) { // last verse runs to the chapter end: restart it only for a current tile that Play all / Sync started and nobody paused
+  if (!x.loop || !Number.isFinite(x.startAt) || !x.shouldPlay || userPaused || syncing) return false;
+  if (tiles.get(x.code) !== x || !x.video.src || x.video.src !== x.loopSrc || x.video.error || x.tile.classList.contains('novideo')) return false;
+  x.video.currentTime = x.startAt; x.loopPrev = x.startAt;
+  x.video.play().catch(() => {});
+  return true;
+}
+const bibleCache = new Map();
+// -> { state: 'ok' | 'none' | 'failed', src, duration, verses: Map verse -> seconds }. 'none' only when the API answers that this language has no such chapter.
+function fetchBibleChapter(code, book, chapter) {
+  const ck = code + '|' + book + '|' + chapter;
+  if (!bibleCache.has(ck)) {
+    const work = (async () => {
+      let d;
+      try { d = await fetchJSON(PUBMEDIA + '&langwritten=' + encodeURIComponent(code) + '&booknum=' + book + '&track=' + chapter); }
+      catch (e) { return /HTTP 404/.test(String(e && e.message)) ? { state: 'none' } : { state: 'failed' }; }
+      const files = ((d.files || {})[code] || {}).MP4 || [];
+      const withRes = files.filter(f => f && f.file && /^https:\/\//.test(f.file.url || '') && f.track === chapter)
+        .map(f => ({ f, res: +((/_r(\d+)P\.mp4/.exec(f.file.url) || [])[1] || 9999) })).sort((a, b) => a.res - b.res);
+      if (!withRes.length) return { state: 'none' };
+      const verses = new Map();
+      for (const f of files) for (const mk of ((f.markers && f.markers.markers) || [])) { const sec = timeToSec(mk.startTime); if (Number.isFinite(sec) && Number.isInteger(mk.verseNumber) && !verses.has(mk.verseNumber)) verses.set(mk.verseNumber, sec); }
+      return { state: 'ok', src: withRes[0].f.file.url, duration: withRes[0].f.duration, verses };
+    })();
+    let timer;
+    const p = Promise.race([work, new Promise(res => { timer = setTimeout(() => res({ state: 'failed' }), BIBLE_TIMEOUT); })]);
+    work.then(() => clearTimeout(timer), () => clearTimeout(timer));
+    bibleCache.set(ck, p);
+    p.then(r => { if (r.state === 'failed') bibleCache.delete(ck); });
+  }
+  return bibleCache.get(ck);
+}
+
+// ---- Titles in the interface language -------------------------------------------------------------
+// A sign-language listing carries titles in that language's own locale (Spanish SL -> Spanish, ASL -> English). Labels follow the
+// interface language instead: the English or Spanish listing first, then an English-/Spanish-locale sign language for items
+// that exist only in sign languages (e.g. the older songbook). Anything still unmatched keeps its own title.
+const UI_SOURCES = { en: ['E', 'ASL'], es: ['S', 'LSE'] };
+const titleCache = new Map();
+function titleKey(it) { return normKey(it).replace(/^pub-sjj_/, 'pub-sjjm_'); } // same songs, renamed songbook
+function uiTitles(coll) { // Promise<Map titleKey -> {title, group}>; failures are not cached
+  const lang = LANG, ck = lang + '|' + coll;
+  if (!titleCache.has(ck)) {
+    const p = Promise.all(UI_SOURCES[lang].map(code => fetchCollection(code, coll))).then(lists => {
+      const m = new Map();
+      for (const items of lists) for (const it of items) { const k = titleKey(it); if (k && !m.has(k)) m.set(k, { title: it.title, group: it.group }); }
+      if (lists.some(l => l.failed)) titleCache.delete(ck); // a partial result is not kept: the next call refetches
+      return m;
+    }).catch(() => { titleCache.delete(ck); return new Map(); });
+    titleCache.set(ck, p);
+  }
+  return titleCache.get(ck);
+}
+function localTitle(it, tm) { const e = tm && tm.get(titleKey(it)); return e && e.title ? e.title : it.title; }
+function localGroup(it, tm) { const e = tm && tm.get(titleKey(it)); return e && e.group ? e.group : it.group; }
+async function relabelTile(x) { // interface language changed: relabel the existing options in place, the video is not touched
+  if (x.coll === 'BIBLE') { for (const o of x.sel.querySelectorAll('option')) { const p = parseBibleKey(o.value); if (p) o.textContent = bibleLabel(p); } return; }
+  const tm = await uiTitles(x.coll);
+  const byKey = new Map((x.items || []).map(it => [it.naturalKey, it]));
+  for (const o of x.sel.querySelectorAll('option')) { const it = byKey.get(o.value); if (it) o.textContent = localTitle(it, tm); }
+  for (const og of x.sel.querySelectorAll('optgroup')) { const first = (x.items || []).find(it => it.group === og.dataset.g); if (first) og.label = localGroup(first, tm); }
+}
+
+function pickFile(media) {
+  const mp4s = (media.files || [])
+    .filter(f => f.mimetype === 'video/mp4' && f.progressiveDownloadURL)
+    .map(f => {
+      const m = f.progressiveDownloadURL.match(/_r(\d+)P\.mp4/);
+      return { url: f.progressiveDownloadURL, res: m ? parseInt(m[1], 10) : 9999 };
+    })
+    .sort((a, b) => a.res - b.res);
+  if (!mp4s.length) return null;
+  const preferred = mp4s.find(f => f.res === 240) || mp4s[0];
+  return preferred.url;
+}
+
+function normKey(it) { return (it && (it.agnostic || it.naturalKey)) ? String(it.agnostic || it.naturalKey).replace(/_[A-Z]{2,5}(_\d+_VIDEO)$/, '\$1') : ''; }
+function allVideos() { return [...tiles.values()].map(x => x.video); }
+function activeVideos() { return [...tiles.values()].filter(x => x.video.src && !x.video.error && !x.tile.classList.contains('novideo')).map(x => x.video); }
+// Common start time: the furthest timestamp, kept inside the shortest video.
+function syncTarget(times, durations) {
+  const ts = times.filter(Number.isFinite);
+  const ds = durations.filter(d => Number.isFinite(d) && d > 0);
+  if (!ts.length) return 0;
+  const hi = Math.max(...ts);
+  return ds.length ? Math.max(0, Math.min(hi, Math.min(...ds) - 1)) : hi;
+}
+function waitReady(v, ms) { // resolves true when the first frame is available, false on timeout
+  return new Promise(res => {
+    if (v.readyState >= 2) return res(true);
+    const done = ok => { clearTimeout(tm); v.removeEventListener('loadeddata', on); res(ok); };
+    const on = () => done(true);
+    const tm = setTimeout(() => done(false), ms);
+    v.addEventListener('loadeddata', on);
+  });
+}
+function seekTo(v, time, ms = 5000) { // true only when the browser confirmed the seek; false on timeout
+  return new Promise(res => {
+    if (Math.abs(v.currentTime - time) < 0.05) return res(true);
+    const done = ok => { clearTimeout(tm); v.removeEventListener('seeked', on); res(ok); };
+    const on = () => done(true);
+    const tm = setTimeout(() => done(false), ms);
+    v.addEventListener('seeked', on);
+    v.currentTime = time;
+  });
+}
+function positionFor(frac, duration) { // same relative position, kept just inside the video
+  if (!Number.isFinite(duration) || duration <= 0) return null;
+  return Math.min(Math.max(0, frac), 1) * Math.max(0, duration - 1);
+}
+function skipTarget(times, durations, delta) {
+  const ds = durations.filter(d => Number.isFinite(d) && d > 0);
+  const base = syncTarget(times, durations);
+  return Math.max(0, ds.length ? Math.min(base + delta, Math.min(...ds) - 1) : base + delta);
+}
+let jumpDragging = false;
+async function jumpAllTo(frac) {
+  const vs = activeVideos().filter(v => Number.isFinite(v.duration));
+  await Promise.all(vs.map(v => seekTo(v, positionFor(frac, v.duration))));
+}
+async function skipAll(delta) { // moves every tile to one common timestamp, so it also realigns them
+  const vs = activeVideos().filter(v => Number.isFinite(v.duration));
+  if (!vs.length) return;
+  const target = skipTarget(vs.map(v => v.currentTime), vs.map(v => v.duration), delta);
+  await Promise.all(vs.map(v => seekTo(v, target)));
+}
+function flashNotice(text, ms) {
+  const n = document.getElementById('notice');
+  n.textContent = text;
+  if (ms) setTimeout(() => { if (n.textContent === text) n.textContent = ''; }, ms);
+}
+// Pause everything, wait until every tile can show a frame, seek all to one timestamp, then press play in the same tick.
+const SYNC_TIMEOUTS = { ready: 10000, seek: 5000, settle: 5000 };
+let syncGen = 0, syncing = false, userPaused = false;
+function cancelSync() { syncGen++; syncing = false; flashNotice(''); } // any pending startTogether stops before its next seek or play
+function snapshotOf(vs) { return vs.map(v => ({ v, src: v.src })); }
+function entryOf(v) { return [...tiles.values()].find(x => x.video === v); }
+// A skipped tile remembers the source it was skipped with; auto-resume leaves it paused until a new Sync, Retry or a new source.
+function markSkipped(s) { const x = entryOf(s.v); if (x) x.syncSkipSrc = s.src; }
+function stillValid(s) { // same tile, same source, no error, tile not marked unavailable
+  return [...tiles.values()].some(x => x.video === s.v && !x.tile.classList.contains('novideo')) && s.v.src === s.src && !s.v.error;
+}
+// Pause everything, wait until every tile can show a frame, seek all to one timestamp, verify it, then press play in the same tick.
+// A tile whose readiness, seek or readback is not confirmed is skipped and reported, never played out of sync.
+async function startTogether() {
+  const gen = ++syncGen;
+  syncing = true; userPaused = false;
+  const cancelled = () => gen !== syncGen;
+  let skipped = 0;
+  try {
+    for (const x of tiles.values()) x.syncSkipSrc = ''; // a new run re-evaluates every tile
+    const all = snapshotOf(activeVideos());
+    let snaps = all;
+    if (!snaps.length) return;
+    const total = snaps.length;
+    flashNotice(t('syncing'));
+    snaps.forEach(s => s.v.pause());
+    const ready = await Promise.all(snaps.map(s => waitReady(s.v, SYNC_TIMEOUTS.ready)));
+    if (cancelled()) return;
+    snaps = snaps.filter((s, i) => ready[i] && stillValid(s));
+    if (!snaps.length) { skipped = total; all.forEach(markSkipped); return; }
+    const target = syncTarget(snaps.map(s => s.v.currentTime), snaps.map(s => s.v.duration));
+    // A Bible passage starts each tile at its own verse (the languages sign at different times); every other video uses the common timestamp.
+    const targetOf = s => { const x = entryOf(s.v); return (x && Number.isFinite(x.startAt)) ? x.startAt : target; };
+    const seeked = await Promise.all(snaps.map(s => seekTo(s.v, targetOf(s), SYNC_TIMEOUTS.seek)));
+    if (cancelled()) return;
+    snaps = snaps.filter((s, i) => seeked[i] && stillValid(s));
+    const settled = await Promise.all(snaps.map(s => waitReady(s.v, SYNC_TIMEOUTS.settle)));
+    if (cancelled()) return;
+    snaps = snaps.filter((s, i) => settled[i] && stillValid(s) && s.v.readyState >= 2 && Math.abs(s.v.currentTime - targetOf(s)) <= 0.5);
+    const played = await Promise.all(snaps.map(s => s.v.play().then(() => true, () => false))); // a rejected play() is not a sync either
+    const ok = new Set(snaps.filter((s, i) => played[i]));
+    skipped = total - ok.size;
+    all.filter(s => !ok.has(s)).forEach(markSkipped);
+    ok.forEach(s => { const x = entryOf(s.v); if (x) x.shouldPlay = true; });
+  } finally {
+    if (!cancelled()) { syncing = false; flashNotice(skipped ? t('syncSkipped')(skipped) : '', skipped ? 8000 : 0); }
+  }
+}
+
+const VOL_KEY = 'jwSignMosaic.vol';
+function clampVolume(x) { const n = Number(x); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1; }
+const savedVol = readStored(VOL_KEY);
 let masterVol = clampVolume(savedVol === null ? 1 : savedVol);
 let audible = null; // the only tile that may produce sound
 function muteOthers(except) { // pass null to silence every tile
@@ -625,10 +1193,9 @@ async function loadTileProgram(entry, item) {
     const src = item.bibleSrc || pickFile(item.media || {});
     entry.startAt = item.bibleSrc ? item.startAt : undefined; // Bible passages open at their verse; other videos at the start
     entry.endAt = item.bibleSrc ? item.endAt : undefined; entry.loop = !!(item.bibleSrc && item.loop); // a chosen verse repeats instead of running on
-    entry.note.textContent = item.verseNote ? t('noVerseMark') : '';
     if (src) {
       setStatus(entry, 'loading');
-      video.src = src; video.load(); // load paused; playback starts only from Play all / Sync
+      video.src = src; entry.loopSrc = video.src; video.load(); // load paused; playback starts only from Play all / Sync
       if (entry.armWatchdog) entry.armWatchdog();
     } else { setStatus(entry, 'noMp4', undefined, true); }
   } catch (e) { setStatus(entry, 'loadErr', e.message, true); }
@@ -663,7 +1230,8 @@ async function fillBible(entry, key, listOnly) {
   }
   if (r.state === 'none') { markUnavailable(entry, key); return; } // this language has no such chapter: black cell, never another passage
   const start = p.verse ? r.verses.get(p.verse) : 0;
-  const item = { naturalKey: key, title: bibleLabel(p), group: '', media: null, bibleSrc: r.src, startAt: Number.isFinite(start) ? start : 0, endAt: Number.isFinite(start) ? verseEnd(r.verses, start) : undefined, loop: !!(p.verse && Number.isFinite(start)), verseNote: !!(p.verse && !Number.isFinite(start)) };
+  if (p.verse && !Number.isFinite(start)) { markUnavailable(entry, key); return; } // this language has no marker for that verse: black cell, never the chapter from its start
+  const item = { naturalKey: key, title: bibleLabel(p), group: '', media: null, bibleSrc: r.src, startAt: Number.isFinite(start) ? start : 0, endAt: Number.isFinite(start) ? verseEnd(r.verses, start) : undefined, loop: !!(p.verse && Number.isFinite(start)) };
   entry.items = [item];
   entry.sel.selectedIndex = 0;
   await loadTileProgram(entry, item);
@@ -759,7 +1327,9 @@ async function addTile(lang) {
   const loaded = () => { clearTimeout(loadTimer); status.style.display = 'none'; updateRetryUI(); sortTiles(); };
   video.addEventListener('playing', loaded);
   video.addEventListener('loadedmetadata', () => { if (entry.startAt > 0 && Number.isFinite(video.duration) && entry.startAt < video.duration) video.currentTime = entry.startAt; }); // Bible verse start
-  video.addEventListener('ended', () => { if (entry.loop && Number.isFinite(entry.startAt)) { video.currentTime = entry.startAt; video.play().catch(() => {}); } }); // last verse: chapter end
+  video.addEventListener('ended', () => onVerseEnded(entry)); // last verse: chapter end
+  video.addEventListener('seeking', () => onVerseSeek(entry));
+  video.addEventListener('seeked', () => onVerseSeek(entry));
   video.addEventListener('loadeddata', loaded); // first frame ready: the tile is loaded and waits paused
   let retried = false;
   video.addEventListener('error', () => {
@@ -1125,7 +1695,6 @@ function setLang(l) {
     }
     x.sel.title = x.partial ? t('partialTip') : '';
     x.nomsg.textContent = t('naText');
-    if (x.note.textContent) x.note.textContent = t('noVerseMark');
     x.tile.querySelector('.audio').title = t('audioTip');
     x.tile.querySelector('.audio').setAttribute('aria-label', t('audioTip'));
     x.tile.querySelector('.fs').title = t('fsTip');
