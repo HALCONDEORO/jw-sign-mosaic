@@ -71,6 +71,7 @@
   <span class="counter" id="counter" aria-live="polite"></span>
   <button id="addAll"></button>
   <button id="stopAdd" hidden></button>
+  <button id="rmAll"></button>
   <span id="addProgress" role="status"></span>
   <span style="flex:1"></span>
   <div class="addwrap">
@@ -121,6 +122,7 @@ const I18N = {
     capacity: 'Empieza con las ocho habituales y añade más. Sin límite fijo; la capacidad real depende de tu dispositivo y de la conexión.',
     audioTip: 'Escuchar esta lengua', fsTip: 'Pantalla completa', rmTip: 'Quitar',
     langListLbl: 'Lenguas de signos', langEsTip: 'Cambiar a español', langEnTip: 'Cambiar a inglés',
+    rmAll: '✕ Quitar todas', confirmRmAll: 'Quitar todas las lenguas del mosaico. Los vídeos se detendrán. ¿Continuar?',
     footer: 'Vídeos servidos directamente desde los servidores de jw.org (API pública y CDN). Herramienta personal, sin afiliación ni respaldo oficial. La reproducción simultánea depende de la disponibilidad del vídeo y de tu dispositivo.'
   },
   en: {
@@ -147,6 +149,7 @@ const I18N = {
     capacity: 'Start with the usual eight and add more. No fixed limit; actual capacity depends on your device and connection.',
     audioTip: 'Listen to this language', fsTip: 'Fullscreen', rmTip: 'Remove',
     langListLbl: 'Sign languages', langEsTip: 'Switch to Spanish', langEnTip: 'Switch to English',
+    rmAll: '✕ Remove all', confirmRmAll: 'Remove every language from the mosaic. Playback will stop. Continue?',
     footer: 'Videos served directly from jw.org servers (public API and CDN). Personal tool, not affiliated or endorsed. Simultaneous playback depends on video availability and your device.'
   }
 };
@@ -192,6 +195,12 @@ function saveState() {
   localStorage.setItem(LS_KEY, JSON.stringify({ langs }));
 }
 function updateCounter() { document.getElementById('counter').textContent = t('counter')(tiles.size); }
+function sortTiles() { // tiles with the publication first, unavailable last; stable, keeps playback
+  const available = [], unavailable = [];
+  for (const x of tiles.values()) (x.tile.classList.contains('novideo') ? unavailable : available).push(x);
+  for (const x of [...available, ...unavailable]) grid.appendChild(x.tile); // moves the node, videos keep playing
+}
+
 function setStatus(entry, key, arg, isErr) { // every visible status comes from the active dictionary
   entry.statusKey = key; entry.statusArg = arg;
   entry.status.style.display = '';
@@ -267,7 +276,7 @@ function markUnavailable(entry, msgKey) { // never substitute another video: rep
   tile.classList.add('novideo');
   video.pause(); video.removeAttribute('src'); video.load();
   setStatus(entry, msgKey || 'noEquiv');
-  saveState(); refreshGlobalPicker();
+  saveState(); refreshGlobalPicker(); sortTiles();
 }
 
 async function loadTileProgram(entry, item) {
@@ -277,7 +286,7 @@ async function loadTileProgram(entry, item) {
     tile.classList.add('novideo');
     video.pause(); video.removeAttribute('src'); video.load();
     setStatus(entry, 'noVideoPub');
-    saveState(); refreshGlobalPicker();
+    saveState(); refreshGlobalPicker(); sortTiles();
     return;
   }
   tile.classList.remove('novideo');
@@ -289,7 +298,7 @@ async function loadTileProgram(entry, item) {
       if (entry.armWatchdog) entry.armWatchdog();
     } else { setStatus(entry, 'noMp4', undefined, true); }
   } catch (e) { setStatus(entry, 'loadErr', e.message, true); }
-  saveState(); refreshGlobalPicker();
+  saveState(); refreshGlobalPicker(); sortTiles();
 }
 
 async function fillPrograms(entry, keepProg, strict, deferLoad) {
@@ -460,7 +469,7 @@ document.getElementById('globColl').addEventListener('change', () => refreshGlob
 document.getElementById('globApply').addEventListener('click', async () => {
   const coll = document.getElementById('globColl').value;
   const nk = document.getElementById('globProg').value;
-  for (const x of tiles.values()) {
+  const applyOne = async (x) => {
     x.selColl.value = coll;
     if (x.coll !== coll) { x.coll = coll; x.prog = ''; await fillPrograms(x, '', false, true); }
     if (nk) {
@@ -468,8 +477,13 @@ document.getElementById('globApply').addEventListener('click', async () => {
       if (it) { x.sel.value = it.naturalKey; await loadTileProgram(x, it); }
       else markUnavailable(x); // the publication does not exist in this language: report it, never substitute
     }
-    await new Promise(r => setTimeout(r, 250)); // breathing room between tiles
-  }
+  };
+  // Resolve every tile in parallel, with a bounded pool so jw.org and the device are not flooded.
+  const queue = [...tiles.values()];
+  const workers = Array.from({ length: Math.min(6, queue.length) }, async () => {
+    while (queue.length) await applyOne(queue.shift());
+  });
+  await Promise.all(workers);
 });
 
 async function loadCatalog() {
@@ -563,6 +577,13 @@ async function addCatalogLanguages() {
 }
 document.getElementById('addAll').addEventListener('click', addCatalogLanguages);
 document.getElementById('stopAdd').addEventListener('click', () => { stopAddingAll = true; });
+document.getElementById('rmAll').addEventListener('click', () => {
+  if (!tiles.size) return;
+  if (!confirm(t('confirmRmAll'))) return;
+  for (const x of tiles.values()) { x.video.pause(); x.video.removeAttribute('src'); x.video.load(); x.tile.remove(); }
+  tiles.clear();
+  updateCounter(); saveState(); refreshGlobalPicker(true); renderAddList();
+});
 
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.addwrap')) setAddPanel(false);
@@ -593,6 +614,7 @@ function applyI18n() {
   document.getElementById('langES').setAttribute('aria-pressed', String(LANG === 'es'));
   document.getElementById('langEN').setAttribute('aria-pressed', String(LANG === 'en'));
   document.getElementById('stopAdd').textContent = t('stopAdd');
+  document.getElementById('rmAll').textContent = t('rmAll');
   document.getElementById('capacityNote').textContent = t('capacity');
   document.getElementById('langES').classList.toggle('active', LANG === 'es');
   document.getElementById('langEN').classList.toggle('active', LANG === 'en');
