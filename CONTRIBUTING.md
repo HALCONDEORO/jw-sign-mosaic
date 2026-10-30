@@ -7,3 +7,7 @@
 - Do not mix languages in the same PR.
 - One topic per PR: keep the change focused and small enough to review.
 - No direct pushes to the default branch for shared work: open a PR and wait for review and green CI before merging.
+
+## Architecture
+
+The app is a single `index.html` (markup, CSS and one `<script>`), with no build step. The offline tests in `test/` read that file and run slices of the script in Node's `vm`, so no browser or network is needed. Run them with `npm test` (Node 20 or later; CI uses Node 22).
