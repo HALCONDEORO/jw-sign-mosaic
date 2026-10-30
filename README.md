@@ -50,6 +50,11 @@ Personal, unaffiliated project. Not endorsed by JW.org or its publishers.
 
 This repository hosts no jw.org media, transcripts or catalogue copies. It contains the page code, its tests and its documentation. Videos and metadata are requested by the visitor's browser from jw.org servers. If the rights holder asks for a change or removal, it will be done promptly: open an issue or contact the repository owner. No third-party logos or brand assets are included.
 
+## Documentation
+
+- [Usage guide](docs/usage-guide.md): every control, step by step.
+- [Languages](docs/languages.md): where the catalogue comes from, the default eight, availability rules.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
