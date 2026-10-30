@@ -1,5 +1,6 @@
 # JW Sign Language Mosaic
 
+
 Watch the same JW Broadcasting program — or any sign-language video publication from jw.org — in several sign languages at once, side by side, straight from the official jw.org CDN.
 
 **Live demo: https://halcondeoro.github.io/jw-sign-mosaic/**
@@ -12,12 +13,16 @@ Watch the same JW Broadcasting program — or any sign-language video publicatio
 - **Load first, then play**: nothing starts by itself. Every tile (including languages you add later) loads paused and shows its first frame; playback starts only when you press Play all (or Sync), together.
 - **Titles in the interface language**: publication lists show English titles with the EN interface and Spanish with ES (from the jw.org English/Spanish listings; items that exist only in sign languages keep the sign-language title).
 - **Not available = black cell**: if a language does not have the chosen publication, its cell is black and says so; it never shows a different video.
-- **Compare a Bible passage**: in "For all" choose "Bible: book, chapter and verse", then a book, a chapter and (optionally) a verse. Every tile loads that chapter in its own language and opens at that verse; Play all then starts each tile at its verse. Languages without that chapter show the black "Not available" cell. Book names follow the interface language. Verse starts come from the verse markers of the jw.org sign-language Bible (not every chapter has them: those open at the chapter start with a short note).
+- **Compare a Bible passage**: in "For all" (or in any tile) choose "Bible: book, chapter and verse", then a book, a chapter and (optionally) a verse. Every tile loads that chapter in its own language and opens paused at that verse; Play all then starts each tile at its verse. Book names follow the interface language. The picker and shared links restore the passage.
+- **Chosen verse repeats**: with a verse selected, each playing tile loops that verse (from its verse marker to the next one; the last verse ends with the chapter) instead of running on. "Whole chapter" keeps playing on. Each language has its own markers, so tiles loop independently. Seeking by hand is respected.
+- **Strict Bible availability**: a language without the chapter, or without a marker for the chosen verse, shows the black "Not available in this language" cell. It never loads a different passage or the chapter from its start. Verse markers come from the jw.org sign-language Bible (pub-media API); "Whole chapter" does not need them.
 - **Synchronized start**: Play all and Sync pause every tile, wait until each can show a frame, seek all to the furthest common timestamp and press play together. Tiles still loading are skipped and reported.
 - **One volume control**: a single slider; only one tile has sound at a time (also when you unmute from a tile's own player controls).
 - **Shareable link**: "Copy link" gives a URL that opens the mosaic with the same languages, collection and publication.
 - **Jump all to the same position**: a slider (same relative position in every video) plus -10 s / +10 s buttons. The jw.org API exposes no chapter or song markers, so jumping is position based.
-- **Retry failed**: a button appears when some tiles fail and reloads only those.
+- **Retry failed**: a button appears when some tiles fail and reloads only those. A retried tile loads paused and joins the next Play all.
+- **Tile order**: tiles that load come first, then tiles with a load error, then tiles whose language has no such video. Order inside each group is the order you added them. Tiles are moved, not rebuilt, so playing videos are not interrupted, and a failed tile that loads on retry moves back up.
+- **Safe storage**: language, volume and saved selection never break the page if the browser blocks or fills `localStorage`; the app keeps working without saving.
 - Per-tile audio toggle, fullscreen, and removal.
 - Your selection (languages + collection + program per tile) persists in `localStorage`.
 - **Add more languages** individually, or add the available catalogue after confirmation. Bulk additions run one at a time and can be stopped. There is no fixed 16-tile limit. Many simultaneous videos can overload the device or connection; add only what your device handles. The player prefers the 240p MP4 rendition.
@@ -32,7 +37,7 @@ Use only for personal, noncommercial viewing. [JW terms](https://www.jw.org/en/t
 
 ## Tests
 
-Run `node --test test/*.test.cjs` (Node 20 or later). The offline tests cover default languages, additions, restoration, input validation, and strict program matching. They do not prove all catalogue translations exist or that a device can play the entire catalogue at once.
+Run `node --test test/*.test.cjs` (Node 20 or later). The offline tests cover default languages, additions, restoration, input validation, strict program matching, synchronized start, shared volume, share links, retry, tile ordering, storage failures, and the Bible passage picker (strict availability, verse start, verse repeat). They do not prove all catalogue translations exist or that a device can play the entire catalogue at once.
 
 Personal, unaffiliated project. Not endorsed by JW.org or its publishers.
 
