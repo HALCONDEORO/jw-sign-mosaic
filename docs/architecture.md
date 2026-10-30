@@ -6,7 +6,7 @@ The whole application is a single `index.html` (about 1,400 lines): markup, CSS 
 
 ## Where the data comes from
 
-The page is a thin client over two public jw.org APIs plus the official CDN. The visitor's browser talks to these endpoints directly; the project never proxies or rehosts anything and persists nothing server-side. During a visit the page keeps only in-memory caches of metadata lookups (publication files, Bible chapters, listing titles) plus the browser's normal buffering; none of it outlives the visit.
+The page is a thin client over two public jw.org APIs plus the official CDN. The visitor's browser talks to these endpoints directly; the project never proxies or rehosts anything and persists nothing server-side. During a visit the page keeps only in-memory caches of metadata lookups (publication files, Bible chapters, listing titles) plus the browser's normal buffering; the in-memory maps live only for the visit.
 
 | Purpose | Endpoint |
 |---|---|
