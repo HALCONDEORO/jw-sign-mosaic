@@ -368,6 +368,18 @@ function parseBibleKey(k) {
 function bibleLabel(p) { return BIBLE_NAMES[LANG][p.book - 1] + ' ' + p.chapter + (p.verse ? ':' + p.verse : ''); }
 function timeToSec(s) { const m = /^(\d+):(\d{2}):(\d{2}(?:\.\d+)?)$/.exec(String(s || '')); return m ? (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]) : NaN; }
 let BIBLE_TIMEOUT = 25000; // a hung request becomes a retriable failure
+// A chosen verse plays only itself and repeats: it ends where the next verse marker starts (the last verse ends with the chapter).
+function verseEnd(verses, start) {
+  let e = Infinity;
+  for (const sec of verses.values()) if (sec > start && sec < e) e = sec;
+  return e === Infinity ? undefined : e;
+}
+function loopVerse(x) { // true when the tile just wrapped back to the start of its verse; seeking far past the verse is left alone
+  const v = x.video;
+  if (!x.loop || !Number.isFinite(x.startAt) || !Number.isFinite(x.endAt) || v.paused || v.ended) return false;
+  if (v.currentTime >= x.endAt && v.currentTime < x.endAt + 1.5) { v.currentTime = x.startAt; return true; }
+  return false;
+}
 const bibleCache = new Map();
 // -> { state: 'ok' | 'none' | 'failed', src, duration, verses: Map verse -> seconds }. 'none' only when the API answers that this language has no such chapter.
 function fetchBibleChapter(code, book, chapter) {
@@ -600,7 +612,7 @@ async function loadTileProgram(entry, item) {
   entry.shouldPlay = false; // a new source always loads paused
   if (item) entry.want = '';
   tile.classList.remove('indet');
-  entry.startAt = undefined; entry.note.textContent = '';
+  entry.startAt = undefined; entry.endAt = undefined; entry.loop = false; entry.note.textContent = '';
   if (!item) {
     tile.classList.add('novideo');
     video.pause(); video.removeAttribute('src'); video.load();
@@ -612,6 +624,7 @@ async function loadTileProgram(entry, item) {
   try {
     const src = item.bibleSrc || pickFile(item.media || {});
     entry.startAt = item.bibleSrc ? item.startAt : undefined; // Bible passages open at their verse; other videos at the start
+    entry.endAt = item.bibleSrc ? item.endAt : undefined; entry.loop = !!(item.bibleSrc && item.loop); // a chosen verse repeats instead of running on
     entry.note.textContent = item.verseNote ? t('noVerseMark') : '';
     if (src) {
       setStatus(entry, 'loading');
@@ -630,7 +643,7 @@ async function fillBible(entry, key, listOnly) {
   // Asking for a passage invalidates the old one at once, not when the answer arrives: the old video stops, no retry or
   // auto-resume can bring it back, and the request is kept for Retry and the saved state even if the network hangs.
   cancelRetry(entry);
-  entry.shouldPlay = false; entry.startAt = undefined; entry.note.textContent = '';
+  entry.shouldPlay = false; entry.startAt = undefined; entry.endAt = undefined; entry.loop = false; entry.note.textContent = '';
   entry.video.pause(); entry.video.removeAttribute('src'); entry.video.load();
   entry.items = []; entry.partial = false; entry.sel.classList.remove('partial'); entry.sel.title = '';
   entry.prog = ''; entry.want = key;
@@ -650,7 +663,7 @@ async function fillBible(entry, key, listOnly) {
   }
   if (r.state === 'none') { markUnavailable(entry, key); return; } // this language has no such chapter: black cell, never another passage
   const start = p.verse ? r.verses.get(p.verse) : 0;
-  const item = { naturalKey: key, title: bibleLabel(p), group: '', media: null, bibleSrc: r.src, startAt: Number.isFinite(start) ? start : 0, verseNote: !!(p.verse && !Number.isFinite(start)) };
+  const item = { naturalKey: key, title: bibleLabel(p), group: '', media: null, bibleSrc: r.src, startAt: Number.isFinite(start) ? start : 0, endAt: Number.isFinite(start) ? verseEnd(r.verses, start) : undefined, loop: !!(p.verse && Number.isFinite(start)), verseNote: !!(p.verse && !Number.isFinite(start)) };
   entry.items = [item];
   entry.sel.selectedIndex = 0;
   await loadTileProgram(entry, item);
@@ -746,6 +759,7 @@ async function addTile(lang) {
   const loaded = () => { clearTimeout(loadTimer); status.style.display = 'none'; updateRetryUI(); sortTiles(); };
   video.addEventListener('playing', loaded);
   video.addEventListener('loadedmetadata', () => { if (entry.startAt > 0 && Number.isFinite(video.duration) && entry.startAt < video.duration) video.currentTime = entry.startAt; }); // Bible verse start
+  video.addEventListener('ended', () => { if (entry.loop && Number.isFinite(entry.startAt)) { video.currentTime = entry.startAt; video.play().catch(() => {}); } }); // last verse: chapter end
   video.addEventListener('loadeddata', loaded); // first frame ready: the tile is loaded and waits paused
   let retried = false;
   video.addEventListener('error', () => {
@@ -1155,6 +1169,7 @@ function autoResume() {
   }
 }
 setInterval(autoResume, 15000);
+setInterval(() => { for (const x of tiles.values()) loopVerse(x); }, 100); // verse loop: wrap at the next verse marker
 
 (async function init() {
   applyI18n();
