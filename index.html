@@ -100,6 +100,8 @@
   <select id="gBook" hidden></select>
   <select id="gChap" hidden></select>
   <select id="gVerse" hidden></select>
+  <select id="gPub" hidden></select>
+  <select id="gTrack" hidden></select>
   <button id="globApply"></button>
 </div>
 <div class="globrow" id="jumpRow">
@@ -130,7 +132,7 @@ const I18N = {
     counter: n => n + ' lenguas seleccionadas',
     loading: 'Cargando…', retrying: 'Reintentando…',
     slowMsg: 'Sigue sin cargar. Toca aquí para reintentar.',
-    bibleColl: 'Biblia: libro, capítulo y versículo', wholeChapter: 'Capítulo completo', bookLbl: 'Libro', chapLbl: 'Capítulo', verseLbl: 'Versículo',
+    bibleColl: 'Biblia: libro, capítulo y versículo', pubsColl: 'Publicaciones (libros y folletos)', pubLbl: 'Publicación', trackLbl: 'Vídeo', wholeChapter: 'Capítulo completo', bookLbl: 'Libro', chapLbl: 'Capítulo', verseLbl: 'Versículo',
     noEquiv: 'Esta publicación no está disponible en esta lengua.',
     loadErr: e => 'Error al cargar (' + e + ')',
     failMsg: 'No se pudo cargar el vídeo. Toca aquí o usa Reintentar fallidas.',
@@ -167,7 +169,7 @@ const I18N = {
     counter: n => n + ' languages selected',
     loading: 'Loading…', retrying: 'Retrying…',
     slowMsg: 'Still not loading. Tap here to retry.',
-    bibleColl: 'Bible: book, chapter and verse', wholeChapter: 'Whole chapter', bookLbl: 'Book', chapLbl: 'Chapter', verseLbl: 'Verse',
+    bibleColl: 'Bible: book, chapter and verse', pubsColl: 'Publications (books and brochures)', pubLbl: 'Publication', trackLbl: 'Video', wholeChapter: 'Whole chapter', bookLbl: 'Book', chapLbl: 'Chapter', verseLbl: 'Verse',
     noEquiv: 'This publication is not available in this language.',
     loadErr: e => 'Load error (' + e + ')',
     failMsg: 'The video failed to load. Tap here or use Retry failed.',
@@ -222,6 +224,7 @@ function collectionsFor() { return [
   ['VODOurOrganization', LANG === 'es' ? 'Nuestra organización' : 'Our organization'],
   ['VODBible', LANG === 'es' ? 'La Biblia' : 'The Bible'],
   ['BIBLE', t('bibleColl')],
+  ['PUBS', t('pubsColl')],
   ['VODMovies', LANG === 'es' ? 'Producciones audiovisuales' : 'Movies'],
   ['VODIntExp', LANG === 'es' ? 'Entrevistas y experiencias' : 'Interviews and experiences'],
 ]; }
@@ -354,6 +357,7 @@ async function fetchCollection(code, collKey) {
 // ---- Bible passage (book, chapter, verse) -----------------------------------------------------------
 // The sign-language Bible is not in the mediator listings: it comes from the pub-media API, one video per chapter, with verse markers.
 // Names and chapter counts were checked against that API (66 books, 1189 chapters).
+const PUB_MEDIA_URL = 'https://b.jw-cdn.org/apis/pub-media/GETPUBMEDIALINKS?output=json&fileformat=MP4&alllangs=0&pub=';
 const PUBMEDIA = 'https://b.jw-cdn.org/apis/pub-media/GETPUBMEDIALINKS?output=json&pub=nwt&fileformat=MP4&alllangs=0';
 const BIBLE_NAMES = {"en": ["Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs", "Ecclesiastes", "Song of Solomon (Canticles)", "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi", "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians", "1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"], "es": ["Génesis", "Éxodo", "Levítico", "Números", "Deuteronomio", "Josué", "Jueces", "Rut", "1 Samuel", "2 Samuel", "1 Reyes", "2 Reyes", "1 Crónicas", "2 Crónicas", "Esdras", "Nehemías", "Ester", "Job", "Salmos", "Proverbios", "Eclesiastés", "El Cantar de los Cantares", "Isaías", "Jeremías", "Lamentaciones", "Ezequiel", "Daniel", "Oseas", "Joel", "Amós", "Abdías", "Jonás", "Miqueas", "Nahúm", "Habacuc", "Sofonías", "Ageo", "Zacarías", "Malaquías", "Mateo", "Marcos", "Lucas", "Juan", "Hechos", "Romanos", "1 Corintios", "2 Corintios", "Gálatas", "Efesios", "Filipenses", "Colosenses", "1 Tesalonicenses", "2 Tesalonicenses", "1 Timoteo", "2 Timoteo", "Tito", "Filemón", "Hebreos", "Santiago", "1 Pedro", "2 Pedro", "1 Juan", "2 Juan", "3 Juan", "Judas", "Revelación (Apocalipsis)"]};
 const BIBLE_CHAPTERS = [50, 40, 27, 36, 34, 24, 21, 4, 31, 24, 22, 25, 29, 36, 10, 13, 10, 42, 150, 31, 12, 8, 66, 52, 5, 48, 12, 14, 3, 9, 1, 4, 7, 3, 3, 3, 2, 14, 4, 28, 16, 24, 21, 28, 16, 16, 13, 6, 6, 4, 4, 5, 3, 6, 4, 3, 1, 13, 5, 5, 3, 5, 1, 1, 1, 22];
@@ -444,6 +448,7 @@ function uiTitles(coll) { // Promise<Map titleKey -> {title, group}>; failures a
 function localTitle(it, tm) { const e = tm && tm.get(titleKey(it)); return e && e.title ? e.title : it.title; }
 function localGroup(it, tm) { const e = tm && tm.get(titleKey(it)); return e && e.group ? e.group : it.group; }
 async function relabelTile(x) { // interface language changed: relabel the existing options in place, the video is not touched
+  if (x.coll === 'PUBS') { for (const o of x.sel.querySelectorAll('option')) { const p = parsePubKey(o.value); if (p) { const ti = (await pubTrackTitles(p.code)).get(PUB_BY.get(p.code)[1][p.track - 1]); o.textContent = pubLabel(p, ti); } } return; }
   if (x.coll === 'BIBLE') { for (const o of x.sel.querySelectorAll('option')) { const p = parseBibleKey(o.value); if (p) o.textContent = bibleLabel(p); } return; }
   const tm = await uiTitles(x.coll);
   const byKey = new Map((x.items || []).map(it => [it.naturalKey, it]));
@@ -684,8 +689,162 @@ async function fillBible(entry, key, listOnly) {
   await loadTileProgram(entry, item);
 }
 
+// ---- Publications (books and brochures) ------------------------------------------------------------
+// Videos of a publication come from the pub-media API: one file set per track. Tracks are paired across languages by track number, which
+// is only safe where it was checked, so the list is fixed (see PUBS) and a language is used only when it has exactly the expected track
+// numbers. Anything else is the black "not available" cell, never another video. A key holds the position in that list (1..n).
+const PUBS = [ // [code, track numbers, English name, Spanish name]: publications whose track pairing was checked (see PUBS_PAIRING_EVIDENCE.csv in the PR)
+  ["jy",[148],"Jesus—The Way, the Truth, the Life","Jesús: el camino, la verdad y la vida"],
+  ["lffv",[1,11,12,13,14,31,32,33,41,42,51,61,71,72,81,91,92,101,102,103,111,121,122,123,131,132,141,142,151,161,171,181,182,183,184,191,192,193,201,202,211,221,231,251,252,253,261,262,263,271,272,291,301,311,312,321,322,331,332,351,361,381,391,401,402,403,411,421,422,423,424,431,442,451,452,453,454,461,471,501,502,531,532,541,543,545,581,591,592,593,601],"Enjoy Life Forever!—An Interactive Bible Course—Videos","¡Disfrute de la vida para siempre! Curso interactivo de la Biblia (videos)"],
+  ["nwtsv",[1,10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210,220,230,240,250,260,270,280,290,300,310,320,330,340,350,360,370,380,390,400,410,420,430,440,450,460,470,480,490,500,510,520,530,540,550,560,570,580,590,600,610,620,630,640,650,660],"Bible Book Introduction Videos","Videos sobre los libros de la Biblia"],
+  ["rrv",[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22],"Pure Worship of Jehovah—Restored At Last!—Videos","La adoración pura de Jehová: ¡por fin restaurada!  (videos)"],
+  ["ebtv",[1,2,3,4,5,6,7,8,9,10,11,12,13,103],"Essential Bible Teachings—Videos","Videos de la Biblia: Enseñanzas básicas"],
+  ["lmdv",[1,2,3,4,5,6,7,8,9,10,11,12],"Love People—Make Disciples—Videos","Hacer discípulos: una obra de amor (videos)"],
+  ["ljf",[1,2,3,4,5,6,7,8,9,10,11],"Learn From Jehovah’s Friends","Aprende de los amigos de Jehová"],
+  ["gnj",[1,2,3,4,5,6,900],"The Good News According to Jesus","Las buenas noticias según Jesús"],
+  ["ivwc",[1,2,3,4,5,6],"The Wonders of Creation Reveal God's Glory","Las maravillas de la creación revelan la gloria de Dios"],
+  ["ivyf",[3],"Young People Ask—What Will I Do With My Life?","Los jóvenes preguntan... ¿Qué haré con mi vida?"],
+  ["rff",[2,3,4,5,6,7],"Reasons for Faith","Razones para tener fe"],
+  ["imv",[2,3,4,5],"Introductions for the Ministry","Presentaciones para el ministerio"],
+  ["apv",[1,2,3],"Apply Bible Principles","Consejos de la Biblia"],
+  ["pcr",[1,2,3,5],"Viewpoints on the Origin of Life","Opiniones sobre el origen de la vida"],
+  ["ohm",[11,12,13],"Our History in Motion","Del pasado al presente"],
+  ["rwl",[1,2,3],"Remember the Wife of Lot","Acuérdense de la esposa de Lot"],
+  ["wdcu",[6,7,8],"Worldwide Design/Construction Updates","Informes del Departamento Mundial de Diseño y Construcción"],
+  ["wmt",[1,2,3],"Warwick Museum Tours","Visitas al museo de Warwick"],
+  ["wsb",[1,2],"Why Study the Bible?","¿Por qué estudiar la Biblia?"],
+  ["cyw",[1,2],"“Commit Your Way to Jehovah”","“Pon tu camino en manos de Jehová”"],
+  ["dlf",[1,2],"Daniel: A Lifetime of Faith","Daniel, un hombre de fe"],
+  ["dns",[1,2],"\"Hope for What We Do Not See\"","\"Esperamos lo que no vemos\""],
+  ["itf",[3,4],"Imitate Their Faith","Ejemplos de fe"],
+  ["ivwrd",[2],"\"These Words... Must Be on Your Heart\"","Estas palabras tienen que estar en tu corazón"],
+  ["jjs",[1,2],"Nehemiah: “The Joy of Jehovah Is Your Stronghold”","Nehemías: La felicidad que viene de Jehová es nuestra fortaleza"],
+  ["jlj",[1,2],"The Story of Josiah: Love Jehovah; Hate What Is Bad","La historia de Josías, un rey que amó a Jehová y odió lo malo"],
+  ["lrc",[1,2],"'For a Certainty God Made Him Lord and Christ'","Con toda seguridad, Dios lo hizo Señor y Cristo"],
+  ["wpc",[1,2],"Jehovah Guides Us in the Way of Peace","Jehová nos guía por el camino de la paz"],
+  ["bcs",[0],"“Be Courageous and Strong and Go to Work”","“Sé valiente y fuerte, y actúa”"],
+  ["bhat",[0],"Be Honest in All Things","Seamos honrados en todo"],
+  ["ciw",[0],"“For This I Have Come Into the World” (Matthew 21:23-46; 22:15-46)","“Para esto he venido al mundo” (Mateo 21:23-46; 22:15-46)"],
+  ["cpw",[1],"Caring for Our Places of Worship","Cuidemos nuestros lugares de adoración"],
+  ["dwj",[1],"David Waited on Jehovah","David esperó a que Jehová actuara"],
+  ["fmh",[0],"Noah—Faith Moved Him to Obey","Noé: la fe lo motivó a obedecer"],
+  ["fmo",[0],"Firm Under Opposition","Firmes ante la oposición"],
+  ["ghj",[0],"‘A Gift in Hand to Jehovah’","Llenemos nuestra mano con una dádiva para Jehová"],
+  ["gnjtv",[1],"The Good News According to Jesus—Tutorial Video","Video tutorial de \"Las buenas noticias según Jesús\""],
+  ["irn",[0],"Iron Sharpens Iron","El hierro con hierro se aguza"],
+  ["ivas",[0],"Our Whole Association of Brothers","Our Whole Association of Brothers"],
+  ["ivdd",[0],"David—He Trusted in God","David—He Trusted in God"],
+  ["ivfa1",[1],"Jehovah's Witnesses—Faith in Action, Part 1: Out of Darkness","Los testigos de Jehová: una historia de fe viva. Parte 1: Salen de la oscuridad"],
+  ["ivfa2",[0],"Jehovah's Witnesses—Faith in Action, Part 2: Let the Light Shine","Los testigos de Jehová: una historia de fe viva. Parte 2: Dejan brillar su luz"],
+  ["ivjwo",[0],"Jehovah's Witnesses—Organized to Share the Good News","Jehovah's Witnesses—Organized to Share the Good News"],
+  ["ivno",[0],"Noah—He Walked With God","Noah—He Walked With God"],
+  ["jcm",[0],"The Story of Jonah—A Lesson in Courage and Mercy","La historia de Jonás, una lección de valentía y compasión"],
+  ["jcr",[0],"“Jehovah Caused Them to Rejoice”","Jehová los llenó de alegría"],
+  ["jdp",[0],"Jehovah Delivers His People (Exodus 3:1-22; 4:1-9; 5:1-9; 6:1-8; 7:1-7; 14:5-10, 13-31; 15:1-21)","Jehová libera a su pueblo (Éxodo 3:1-22; 4:1-9; 5:1-9; 6:1-8; 7:1-7; 14:5-10, 13-31; 15:1-21)"],
+  ["jlp",[0],"Jacob—A  Man Who Loved Peace","Jacob, un hombre que amaba la paz"],
+  ["ksl",[0],"Jehovah Kept Showing Loyal Love","Jehová siguió mostrando amor leal"],
+  ["kyc",[1],"The Kingdom—100 Years and Counting","El Reino: cien años y sumando"],
+  ["ndl",[1],"“There Will Be No Delay Any Longer”","\"Ya no habrá más demora\""],
+  ["ojs",[0],"“Who Is on Jehovah’s Side?” (Exodus 20:1-7; 24:3-18; 32:1-35; 34:1-14)","“¿Quién está de parte de Jehová?” (Éxodo 20:1-7; 24:3-18; 32:1-35; 34:1-14)"],
+  ["patv",[2],"Publication and Application Tutorial Videos","Videos tutoriales sobre Publicación y Aplicación"],
+  ["prms",[1],"Are You Prepared for Medical Situations?","¿Está preparado para una situación médica delicada?"],
+  ["ptr",[0],"Purple Triangles","Los triángulos púrpuras"],
+  ["skem",[2],"Video for Meeting With Those Interested in School for Kingdom Evangelizers","Video para la reunión con los interesados en la Escuela para Evangelizadores del Reino"],
+  ["tiy",[1],"\"O Jehovah, . . . I Trust in You\"","\"Oh, Jehová, en ti confío\""],
+  ["whbs",[1],"What Happens at a Bible Study?","¿Cómo son nuestros cursos bíblicos?"],
+  ["whcov",[1],"What Happens at Our Conventions?","¿Cómo son nuestras asambleas regionales?"],
+  ["whkh",[1],"What Happens at a Kingdom Hall?","¿Cómo son nuestras reuniones?"],
+  ["wys",[0],"Jehovah Wants You to Be Safe","Jehová quiere vernos sanos y salvos"]
+];
+const PUB_BY = new Map(PUBS.map(p => [p[0], p]));
+function pubKey(code, track) { return 'pub_' + code + '_' + track; }
+function parsePubKey(k) {
+  const m = /^pub_([a-z0-9]{2,8})_(\d{1,3})$/.exec(String(k || ''));
+  const p = m && PUB_BY.get(m[1]);
+  const track = m ? +m[2] : 0;
+  return (p && track >= 1 && track <= p[1].length) ? { code: m[1], track } : null; // track = position in the publication's list
+}
+function pubName(code) { const p = PUB_BY.get(code); return p ? p[LANG === 'es' ? 3 : 2] : code; }
+function pubLabel(p, title) { return pubName(p.code) + (PUB_BY.get(p.code)[1].length > 1 ? ' - ' + (title || ('#' + p.track)) : ''); }
+const pubCache = new Map();
+// -> { state: 'ok' | 'none' | 'failed', tracks: Map track number -> { src, title } }. 'none' when the language has no video, or not exactly the expected track numbers.
+function fetchPubMedia(lang, code) {
+  const ck = lang + '|' + code;
+  if (!pubCache.has(ck)) {
+    const work = (async () => {
+      let d;
+      try { d = await fetchJSON(PUB_MEDIA_URL + encodeURIComponent(code) + '&langwritten=' + encodeURIComponent(lang)); }
+      catch (e) { return /HTTP 404/.test(String(e && e.message)) ? { state: 'none' } : { state: 'failed' }; }
+      const expected = PUB_BY.get(code)[1];
+      const single = expected.length === 1;
+      const files = (((d.files || {})[lang] || {}).MP4 || []).filter(f => f && f.file && /^https:\/\//.test(f.file.url || ''));
+      if (single && new Set(files.map(f => f.track)).size > 1) return { state: 'none' }; // a single-video publication must have exactly one track
+      const best = new Map(); // track -> lowest resolution file
+      for (const f of files) {
+        const tr = single ? expected[0] : f.track; // a single-video publication needs no pairing
+        if (!Number.isInteger(tr)) continue;
+        const res = +((/_r(\d+)P\.mp4/.exec(f.file.url) || [])[1] || 9999);
+        const cur = best.get(tr);
+        if (!cur || res < cur.res) best.set(tr, { res, src: f.file.url, title: f.title || '' });
+      }
+      if (best.size !== expected.length || !expected.every(n => best.has(n))) return { state: 'none' };
+      return { state: 'ok', tracks: best };
+    })();
+    let timer;
+    const p = Promise.race([work, new Promise(res => { timer = setTimeout(() => res({ state: 'failed' }), BIBLE_TIMEOUT); })]);
+    work.then(() => clearTimeout(timer), () => clearTimeout(timer));
+    pubCache.set(ck, p);
+    p.then(r => { if (r.state === 'failed') pubCache.delete(ck); });
+  }
+  return pubCache.get(ck);
+}
+async function pubTrackTitles(code) { // track titles in the interface language's reference sign language (ASL for EN, LSE for ES)
+  for (const lang of (LANG === 'es' ? ['LSE', 'ASL'] : ['ASL', 'LSE'])) {
+    const r = await fetchPubMedia(lang, code);
+    if (r.state === 'ok') return new Map([...r.tracks].map(([n, v]) => [n, v.title])); // keyed by track number
+  }
+  return new Map();
+}
+async function fillPub(entry, key, listOnly) {
+  if (listOnly) return;
+  const p = parsePubKey(key) || parsePubKey(SEL.coll === 'PUBS' ? SEL.key : '') || { code: PUBS[0][0], track: 1 };
+  key = pubKey(p.code, p.track);
+  const req = entry.pubReq = (entry.pubReq || 0) + 1;
+  // Same rule as the Bible: asking for a publication invalidates the old video at once and keeps the request for Retry and the saved state.
+  cancelRetry(entry);
+  entry.shouldPlay = false; entry.startAt = undefined; entry.note.textContent = '';
+  entry.video.pause(); entry.video.removeAttribute('src'); entry.video.load();
+  entry.items = []; entry.partial = false; entry.sel.classList.remove('partial'); entry.sel.title = '';
+  entry.prog = ''; entry.want = key;
+  entry.tile.classList.remove('novideo', 'indet');
+  entry.sel.innerHTML = '';
+  const o = document.createElement('option'); o.value = key; o.textContent = pubLabel(p); entry.sel.appendChild(o);
+  entry.sel.selectedIndex = 0;
+  setStatus(entry, 'loading');
+  saveState();
+  const r = await fetchPubMedia(entry.code, p.code);
+  if (tiles.get(entry.code) !== entry || entry.coll !== 'PUBS' || req !== entry.pubReq) return; // removed, or another request replaced this one
+  if (r.state === 'failed') {
+    entry.prog = key; entry.want = key; entry.shouldPlay = false;
+    entry.tile.classList.add('novideo', 'indet');
+    entry.video.pause(); entry.video.removeAttribute('src'); entry.video.load();
+    setStatus(entry, 'loadErr', 'network', true); saveState(); sortTiles(); return;
+  }
+  const trackNo = PUB_BY.get(p.code)[1][p.track - 1];
+  if (r.state === 'none' || !r.tracks.has(trackNo)) { markUnavailable(entry, key); return; }
+  const tr = r.tracks.get(trackNo);
+  const titles = await pubTrackTitles(p.code); // labels use the interface language, not this tile's sign language
+  if (tiles.get(entry.code) !== entry || entry.coll !== 'PUBS' || req !== entry.pubReq) return;
+  o.textContent = pubLabel(p, titles.get(trackNo)); // no interface-language title: '#position', never the tile's own language
+  const item = { naturalKey: key, title: o.textContent, group: '', media: null, bibleSrc: tr.src, startAt: 0 };
+  entry.items = [item];
+  entry.sel.selectedIndex = 0;
+  await loadTileProgram(entry, item);
+}
+
 async function fillPrograms(entry, keepProg, strict, deferLoad, listOnly) {
   if (entry.coll === 'BIBLE') return fillBible(entry, keepProg, listOnly);
+  if (entry.coll === 'PUBS') return fillPub(entry, keepProg, listOnly);
   const { code, sel } = entry;
   const lang0 = LANG;
   let [items, tm] = await Promise.all([fetchCollection(code, entry.coll), uiTitles(entry.coll)]);
@@ -848,8 +1007,9 @@ async function refreshGlobalPrograms(keepProg) {
   const req = ++globProgReq;
   const gc = document.getElementById('globColl');
   const gp = document.getElementById('globProg');
-  showGlobalMode(gc.value === 'BIBLE');
+  showGlobalMode(gc.value === 'BIBLE' ? 'bible' : gc.value === 'PUBS' ? 'pubs' : '');
   if (gc.value === 'BIBLE') { await buildGlobalBible(); return; }
+  if (gc.value === 'PUBS') { await buildGlobalPubs(); return; }
   const first = [...tiles.values()][0];
   gp.innerHTML = '';
   if (!first || !gc.value) return;
@@ -860,10 +1020,37 @@ async function refreshGlobalPrograms(keepProg) {
   if (keepProg) { const k = items.findIndex(it => normKey(it) === keepProg); if (k >= 0) idx = k; }
   gp.selectedIndex = idx;
 }
-function showGlobalMode(bible) {
-  document.getElementById('globProg').hidden = bible;
-  for (const id of ['gBook', 'gChap', 'gVerse']) document.getElementById(id).hidden = !bible;
+function showGlobalMode(mode) { // '' = program list, 'bible', 'pubs'
+  document.getElementById('globProg').hidden = !!mode;
+  for (const id of ['gBook', 'gChap', 'gVerse']) document.getElementById(id).hidden = mode !== 'bible';
+  document.getElementById('gPub').hidden = mode !== 'pubs';
+  if (mode !== 'pubs') document.getElementById('gTrack').hidden = true;
 }
+let pubsUiLang = '', gtReq = 0;
+async function fillGlobalTracks(preferred) { // the video list of the chosen publication, titled in the interface language
+  const gp = document.getElementById('gPub'), gt = document.getElementById('gTrack');
+  const req = ++gtReq, code = gp.value, tn = PUB_BY.has(code) ? PUB_BY.get(code)[1] : [], n = tn.length;
+  gt.innerHTML = '';
+  gt.hidden = n <= 1 || document.getElementById('gPub').hidden;
+  if (n <= 1) return;
+  for (let i = 1; i <= n; i++) { const o = document.createElement('option'); o.value = String(i); o.textContent = '#' + i; gt.appendChild(o); }
+  gt.value = String(preferred >= 1 && preferred <= n ? preferred : 1);
+  const titles = await pubTrackTitles(code);
+  if (req !== gtReq) return;
+  for (const o of gt.options) { const ti = titles.get(tn[+o.value - 1]); if (ti) o.textContent = o.value + '. ' + ti; }
+}
+async function buildGlobalPubs() {
+  const gp = document.getElementById('gPub'), gt = document.getElementById('gTrack');
+  if (pubsUiLang === LANG) { await fillGlobalTracks(+gt.value || 1); return; } // already built: keep the choice, but show the video list again after another section
+  const p = (SEL.coll === 'PUBS' && parsePubKey(SEL.key)) || { code: gp.value || PUBS[0][0], track: +gt.value || 1 };
+  pubsUiLang = LANG;
+  gp.innerHTML = '';
+  for (const [code] of [...PUBS].sort((a, b) => a[LANG === 'es' ? 3 : 2].localeCompare(b[LANG === 'es' ? 3 : 2], LANG))) { const o = document.createElement('option'); o.value = code; o.textContent = pubName(code); gp.appendChild(o); }
+  gp.value = p.code;
+  gp.setAttribute('aria-label', t('pubLbl')); gt.setAttribute('aria-label', t('trackLbl'));
+  await fillGlobalTracks(p.track);
+}
+document.getElementById('gPub').addEventListener('change', () => fillGlobalTracks(1));
 let bibleUiLang = '', gvReq = 0;
 function fillGlobalChapters(preferred) {
   const gb = document.getElementById('gBook'), gc = document.getElementById('gChap');
@@ -928,12 +1115,15 @@ function refreshGlobalPicker(force) {
 document.getElementById('globColl').addEventListener('change', () => { globTouched = true; refreshGlobalPrograms(''); });
 document.getElementById('globApply').addEventListener('click', async () => {
   const coll = document.getElementById('globColl').value;
-  const isBible = coll === 'BIBLE';
-  const nk = isBible ? bibleKey(+document.getElementById('gBook').value, +document.getElementById('gChap').value, +document.getElementById('gVerse').value || 0) : document.getElementById('globProg').value;
+  const isBible = coll === 'BIBLE', isPubs = coll === 'PUBS';
+  const nk = isBible ? bibleKey(+document.getElementById('gBook').value, +document.getElementById('gChap').value, +document.getElementById('gVerse').value || 0)
+    : isPubs ? pubKey(document.getElementById('gPub').value, +document.getElementById('gTrack').value || 1)
+    : document.getElementById('globProg').value;
   if (nk) SEL = { coll, key: nk };
   const applyOne = async (x) => {
     x.selColl.value = coll;
     if (isBible) { x.coll = coll; x.prog = ''; x.want = ''; x.shouldPlay = false; await fillBible(x, nk); return; }
+    if (isPubs) { x.coll = coll; x.prog = ''; x.want = ''; x.shouldPlay = false; await fillPub(x, nk); return; }
     if (x.coll !== coll) { x.coll = coll; x.prog = ''; await fillPrograms(x, '', false, true); }
     if (nk) {
       const it = x.items.find(y => normKey(y) === nk);
