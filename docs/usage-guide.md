@@ -20,7 +20,7 @@ The counter next to the main buttons shows how many languages are selected.
 
 ## Choosing what to watch
 
-Each tile has its own Section and Publication selectors, so it can choose among the sections and publications available for that language. A tile only ever plays a publication that exists in its language:
+Each tile has its own Section and Publication selectors, so it can choose among the supported sections and the publications available for that language. A tile only ever plays a publication that exists in its language:
 
 - **Section** groups the video library as on jw.org: JW Broadcasting monthly programs plus the collections (programs, music, series, children's videos, meetings and ministry, ministry tools, Bible, movies, interviews and more).
 - **Publication** lists the videos in that section, including books and brochures that have video. Publication titles follow the interface language (English or Spanish); items that exist only in sign languages keep their sign-language title.
@@ -50,7 +50,7 @@ To put every tile on the passage, use the **For all** selectors at the top and p
 - **＋ Add language…** opens a searchable list of every sign language in the official jw.org catalogue (search by name or code).
 - **Add all catalogue languages…** adds the whole catalogue one language at a time after a confirmation, keeping the current program. **Stop adding** cancels the bulk add partway.
 - **✕ Remove all** clears the mosaic after a confirmation.
-- There is no fixed tile limit, but many simultaneous videos can exhaust memory, battery or data. Add only what your device handles. The player prefers the 240p MP4 rendition, the smallest available, so each extra stream costs less memory, battery and data.
+- There is no fixed tile limit, but many simultaneous videos can exhaust memory, battery or data. Add only what your device handles. The player prefers the 240p MP4 rendition when available, otherwise the lowest available MP4 resolution, so each extra stream costs less memory, battery and data.
 - If a translation of the current program does not exist, the added tile says so instead of substituting another program.
 
 ## When something is not available

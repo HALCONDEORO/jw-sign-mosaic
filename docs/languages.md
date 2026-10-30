@@ -4,7 +4,7 @@ The mosaic plays the same video in any sign language published on jw.org. This p
 
 ## The catalogue
 
-The language list comes from the official jw.org catalogue API (`/mediator/v1/languages/E/all`). At the time of writing it offers about 110 sign languages out of more than a thousand spoken and written languages. The page reads the live catalogue every time it loads, so new sign languages appear in the "Add language" panel as soon as jw.org publishes them; the repository ships no copy of the catalogue (only the eight default language codes and the built-in section list live in the code, and the publication listings are fetched live as well).
+The language list comes from the official jw.org catalogue API (`/mediator/v1/languages/E/all`). At the time of writing it offers about 110 sign languages out of more than a thousand spoken and written languages. The page reads the live catalogue every time it loads, so new sign languages appear in the "Add language" panel as soon as jw.org publishes them; the repository ships no copy of the catalogue. The eight default language codes, the built-in section list and the curated books/brochures list are built into the code; media files and publication listings are fetched live.
 
 Each language has a short code (LSE for Spanish Sign Language, ASL for American Sign Language, and so on). The search box in the "Add language" panel matches both the language name and its code.
 
