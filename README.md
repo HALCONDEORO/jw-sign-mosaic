@@ -54,6 +54,8 @@ This repository hosts no jw.org media, transcripts or catalogue copies. It conta
 
 - [Usage guide](docs/usage-guide.md): every control, step by step.
 - [Languages](docs/languages.md): where the catalogue comes from, the default eight, availability rules.
+- [Architecture](docs/architecture.md): how the mosaic is built (vanilla JS, no build step).
+- [Legal](docs/legal.md): project status, content sources and disclaimers.
 
 ## License
 
