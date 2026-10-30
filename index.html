@@ -251,6 +251,18 @@ function muteOthers(except) {
   }
 }
 
+function markUnavailable(entry, msgKey) { // nunca sustituir por otro vídeo: avisar y dejar la tarjeta vacía
+  const { status, tile, video, sel } = entry;
+  sel.selectedIndex = -1;
+  entry.prog = '';
+  tile.classList.add('novideo');
+  video.pause(); video.removeAttribute('src'); video.load();
+  status.style.display = ''; status.classList.remove('err');
+  entry.statusKey = msgKey || 'noEquiv';
+  status.textContent = t(entry.statusKey);
+  saveState(); refreshGlobalPicker();
+}
+
 async function loadTileProgram(entry, item) {
   const { video, status, tile } = entry;
   entry.prog = item ? item.naturalKey : '';
@@ -258,6 +270,7 @@ async function loadTileProgram(entry, item) {
     tile.classList.add('novideo');
     video.pause(); video.removeAttribute('src'); video.load();
     status.style.display = ''; status.classList.remove('err');
+    entry.statusKey = 'noVideoPub';
     status.textContent = t('noVideoPub');
     saveState(); refreshGlobalPicker();
     return;
@@ -274,7 +287,7 @@ async function loadTileProgram(entry, item) {
   saveState(); refreshGlobalPicker();
 }
 
-async function fillPrograms(entry, keepProg, strict) {
+async function fillPrograms(entry, keepProg, strict, deferLoad) {
   const { code, sel } = entry;
   sel.innerHTML = '';
   const items = await fetchCollection(code, entry.coll);
@@ -299,17 +312,11 @@ async function fillPrograms(entry, keepProg, strict) {
     const found = items.findIndex(it => it.naturalKey === keepProg || (nk && normKey(it) === nk));
     if (found >= 0) idx = found;
     else if (strict) { // pidieron una publicación concreta y no hay equivalente en esta lengua
-      sel.selectedIndex = -1;
-      entry.prog = '';
-      const { status, tile, video } = entry;
-      tile.classList.add('novideo');
-      video.pause(); video.removeAttribute('src'); video.load();
-      status.style.display = ''; status.classList.remove('err');
-      status.textContent = t('noEquiv');
-      saveState(); refreshGlobalPicker();
+      markUnavailable(entry);
       return;
     }
   }
+  if (deferLoad && !keepProg) { sel.selectedIndex = -1; return; } // no cargar el primero: el llamador decide
   sel.selectedIndex = idx;
   await loadTileProgram(entry, items[idx]);
 }
@@ -412,7 +419,7 @@ async function addTile(lang) {
       inheritProg = refIt ? refIt.naturalKey : '';
     }
   }
-  await fillPrograms(entry, entry.prog || inheritProg, !!inheritProg || !!lang.strictPublication);
+  await fillPrograms(entry, entry.prog || inheritProg, !!inheritProg || !!lang.strictPublication || !!lang.prog);
 }
 
 let globProgReq = 0;
@@ -452,10 +459,11 @@ document.getElementById('globApply').addEventListener('click', async () => {
   const nk = document.getElementById('globProg').value;
   for (const x of tiles.values()) {
     x.selColl.value = coll;
-    if (x.coll !== coll) { x.coll = coll; x.prog = ''; await fillPrograms(x, ''); }
+    if (x.coll !== coll) { x.coll = coll; x.prog = ''; await fillPrograms(x, '', false, true); }
     if (nk) {
       const it = x.items.find(y => normKey(y) === nk);
       if (it) { x.sel.value = it.naturalKey; await loadTileProgram(x, it); }
+      else markUnavailable(x); // la publicación no existe en esta lengua: avisar, no sustituir
     }
     await new Promise(r => setTimeout(r, 250)); // respiro entre tarjetas
   }
@@ -594,7 +602,7 @@ function setLang(l) {
     for (const [key, name] of collectionsFor()) { const o = document.createElement('option'); o.value = key; o.textContent = name; x.selColl.appendChild(o); }
     x.selColl.value = prev;
     if (x.status.style.display !== 'none' && !x.status.classList.contains('err')) {
-      x.status.textContent = x.tile.classList.contains('novideo') ? t('noVideoPub') : t('loading');
+      x.status.textContent = t(x.statusKey || (x.tile.classList.contains('novideo') ? 'noVideoPub' : 'loading'));
     } else if (x.status.classList.contains('err')) {
       x.status.textContent = t('failMsg');
     }
