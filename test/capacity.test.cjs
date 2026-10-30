@@ -70,7 +70,7 @@ test('no UI string is hardcoded in only one language in the tile template',()=>{
 });
 
 // --- sorting: tiles with the publication first, unavailable last ---
-const sortSrc=script.match(/function sortTiles\(\) \{[\s\S]*?\n\}/)[0];
+const sortSrc=script.match(/function tileGroup\(x\) \{[\s\S]*?\n\}\nfunction sortTiles\(\) \{[\s\S]*?\n\}/)[0];
 const mkTile=(nv)=>({classList:{contains:(c)=>c==='novideo'&&nv}});
 function runSort(flags){ // flags: true = novideo
   const calls=[];
@@ -122,4 +122,35 @@ test('remove-all button exists, translated and guarded',()=>{
   assert.match(r,/tiles\.clear\(\)/,'clears every tile');
   assert.match(r,/x\.video\.pause\(\)/,'stops playback explicitly');
   assert.doesNotMatch(h,/location\.reload/,'never reloads the page');
+});
+
+// --- load errors sit between good tiles and unavailable ones ---
+function sortWith(specs, preorder){ // spec: 'ok' | 'err' | 'slow' | 'nv' | 'nverr'
+  const mk=(sp)=>{const cls=new Set(sp==='nv'||sp==='nverr'?['novideo']:[]);
+    const st={style:{display:sp==='ok'||sp==='nv'?'none':''},classList:{contains:c=>c==='err'&&(sp==='err'||sp==='nverr'||sp==='slow')}};
+    return {tile:{classList:{contains:c=>cls.has(c)}},status:st,statusKey:sp==='slow'?'slowMsg':''};};
+  const ents=specs.map(mk);
+  const tiles=new Map(ents.map((e,i)=>['L'+i,e]));
+  const nodes=(preorder||specs.map((_,i)=>i)).map(i=>ents[i].tile);
+  const moved=[];
+  const grid={get children(){return nodes;},appendChild:(n)=>{moved.push(ents.findIndex(e=>e.tile===n));nodes.splice(nodes.indexOf(n),1);nodes.push(n);}};
+  vm.runInContext(sortSrc+'\nsortTiles();',vm.createContext({grid,tiles}));
+  return {order:nodes.map(n=>ents.findIndex(e=>e.tile===n)),moved};
+}
+test('good first, load errors next, unavailable last, stable inside each group',()=>{
+  assert.deepEqual(sortWith(['nv','err','ok','nverr','ok','err']).order,[2,4,1,3,5,0]);
+});
+test('a tile that is only slow stays where it is; a failed load with no video counts as error',()=>{
+  assert.deepEqual(sortWith(['slow','ok','nv']).order,[0,1,2]);
+  assert.equal(sortWith(['nverr','nv']).order[0],0);
+});
+test('already ordered grid is not touched (no jumps while playing)',()=>{
+  assert.deepEqual(sortWith(['ok','ok','err','nv']).moved,[]);
+});
+test('error tile that loads on retry goes back up, others keep their order',()=>{
+  assert.deepEqual(sortWith(['ok','ok','ok','ok'],[0,1,3,2]).order,[0,1,2,3]);
+});
+test('every status change and every successful load re-sorts',()=>{
+  assert.match(script.match(/function setStatus[\s\S]*?\n\}/)[0],/sortTiles\(\)/);
+  assert.match(script,/const loaded = \(\) => \{[^}]*sortTiles\(\)/);
 });
