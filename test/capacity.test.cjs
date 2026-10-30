@@ -19,3 +19,8 @@ test('catalogue failure preserves safe saved codes above16, deduplicated',()=>as
 test('restore rejects malicious or malformed stored codes even if catalogue failed',()=>assert.equal(context.restoredLanguages([{code:'../x'},{code:'<script>'},{code:''},{code:123},{code:'lower'},null,{code:'LSE'}],[]).length,1));
 test('invalid saved state is safe',()=>assert.equal(context.restoredLanguages(null,[]).length,0));
 test('empty/already-added and stopped summaries are explicit',()=>{for(const x of ['emptyCatalog','allAdded','addedSummary']) assert.match(script,new RegExp("t\\('"+x+"'\\)"))});
+test('picker covers every jw.org video-library section incl. ministry tools',()=>{
+  const keys=[...script.matchAll(/\['(StudioMonthlyPrograms|VOD[A-Za-z]+)'/g)].map(m=>m[1]);
+  const uniq=[...new Set(keys)];
+  assert.deepEqual(uniq,['StudioMonthlyPrograms','VODStudio','VODProgramsEvents','VODMusicVideos','VODSeries','VODChildren','VODTeenagers','VODFamily','VODMinistry','VODMinistryTools','VODOurActivities','VODOurOrganization','VODBible','VODMovies','VODIntExp']);
+});
