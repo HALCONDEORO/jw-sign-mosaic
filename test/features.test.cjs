@@ -188,7 +188,7 @@ function volWorld(){
   const slider={value:1};
   const c=vm.createContext({Math,Number,String,document:{getElementById:()=>slider},localStorage:{getItem:()=>null,setItem(){}},tiles:new Map()});
   vm.runInContext(['const VOL_KEY = \'k\';',grab(/function clampVolume\([^\n]*\n/),'let masterVol = 0.3; let audible = null;',
-    grab(/function muteOthers\(except\) \{[\s\S]*?\n}/),grab(/function setMasterVolume\(v\) \{[\s\S]*?\n}/),grab(/function onNativeVolume\(entry\) \{[\s\S]*?\n}/)].join('\n'),c);
+    grab(/function muteOthers\(except\) \{[\s\S]*?\n}/),grab(/function writeStored\([\s\S]*?\n}/),grab(/function setMasterVolume\(v\) \{[\s\S]*?\n}/),grab(/function onNativeVolume\(entry\) \{[\s\S]*?\n}/)].join('\n'),c);
   return {c,run:code=>vm.runInContext(code,c),slider};
 }
 test('new tile arriving unmuted at volume .8 with master .3 keeps .8 and silences the others',()=>{
