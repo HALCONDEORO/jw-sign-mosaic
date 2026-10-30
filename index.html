@@ -217,7 +217,7 @@ async function fetchCollection(code, collKey) {
         try {
           const sd = await fetchJSON(`${API}/categories/${code}/${sub.key}?detailed=1&clientType=www`);
           const scat = sd.category || {};
-          for (const m of (scat.media || []).filter(x => x.type === 'video').slice(0, 100)) {
+          for (const m of (scat.media || []).filter(x => x.type === 'video')) {
             out.push({ naturalKey: m.naturalKey, title: m.title, group: sub.name || sub.key, media: m, agnostic: m.languageAgnosticNaturalKey });
           }
         } catch (e) { /* colección vacía para esta lengua */ }
@@ -280,7 +280,7 @@ async function fillPrograms(entry, keepProg, strict) {
   const items = await fetchCollection(code, entry.coll);
   entry.items = items;
   const groups = new Map();
-  for (const it of items.slice(0, 200)) {
+  for (const it of items) { // sin recorte: el cancionero de reuniones tiene 163 vídeos
     if (!groups.has(it.group)) groups.set(it.group, []);
     groups.get(it.group).push(it);
   }
@@ -425,7 +425,7 @@ async function refreshGlobalPrograms(keepProg) {
   if (!first || !gc.value) return;
   const items = (first.coll === gc.value && first.items && first.items.length) ? first.items : await fetchCollection(first.code, gc.value);
   if (req !== globProgReq) return; // respuesta vieja: el usuario ya volvio a cambiar
-  for (const it of items.slice(0, 120)) { const o = document.createElement('option'); o.value = normKey(it); o.textContent = it.title; gp.appendChild(o); }
+  for (const it of items) { const o = document.createElement('option'); o.value = normKey(it); o.textContent = it.title; gp.appendChild(o); }
   let idx = 0;
   if (keepProg) { const k = items.findIndex(it => normKey(it) === keepProg); if (k >= 0) idx = k; }
   gp.selectedIndex = idx;

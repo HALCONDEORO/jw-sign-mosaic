@@ -24,3 +24,7 @@ test('picker covers every jw.org video-library section incl. ministry tools',()=
   const uniq=[...new Set(keys)];
   assert.deepEqual(uniq,['StudioMonthlyPrograms','VODStudio','VODProgramsEvents','VODMusicVideos','VODSeries','VODChildren','VODTeenagers','VODFamily','VODMinistry','VODMinistryTools','VODOurActivities','VODOurOrganization','VODBible','VODMovies','VODIntExp']);
 });
+test('no picker truncates the 163-song meeting catalog',()=>{
+  assert.doesNotMatch(script,/slice\(0,\s*(100|120|200)\)/,'no hard cuts below the full SJJ catalog (163 videos)');
+  assert.match(script,/for \(const it of items\)/,'pickers iterate the full collection');
+});
