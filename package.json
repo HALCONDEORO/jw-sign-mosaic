@@ -1,0 +1,10 @@
+{
+  "name": "jw-sign-mosaic",
+  "version": "1.2.0",
+  "private": true,
+  "description": "Watch jw.org sign-language videos in many sign languages at once (single-page app, no build step).",
+  "license": "MIT",
+  "repository": "github:HALCONDEORO/jw-sign-mosaic",
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test test/*.test.cjs" }
+}
