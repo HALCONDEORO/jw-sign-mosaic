@@ -6,7 +6,7 @@ The whole application is a single `index.html` (about 1,400 lines): markup, CSS 
 
 ## Where the data comes from
 
-The page is a thin client over two public jw.org APIs plus the official CDN. The visitor's browser talks to these endpoints directly; this project never proxies, caches, rehosts or stores any of it.
+The page is a thin client over two public jw.org APIs plus the official CDN. The visitor's browser talks to these endpoints directly; the project never proxies or rehosts anything and persists nothing server-side. During a visit the page keeps only in-memory caches of metadata lookups (publication files, Bible chapters, listing titles) plus the browser's normal buffering; none of it outlives the visit.
 
 | Purpose | Endpoint |
 |---|---|
@@ -14,16 +14,16 @@ The page is a thin client over two public jw.org APIs plus the official CDN. The
 | Media links (including the sign-language Bible, one video per chapter, with verse markers) | `https://b.jw-cdn.org/apis/pub-media/GETPUBMEDIALINKS?...` |
 | The videos themselves (240p MP4 preferred) | the official jw.org CDN hosts returned by the media API |
 
-Because everything is fetched live, new languages, sections and publications appear in the page as soon as jw.org publishes them.
+The language catalogue and the publication listings of the built-in sections are fetched live, so new sign languages and new publications in those sections appear as jw.org publishes them. The section list itself and the curated books/brochures list are fixed in the code and change only with a page update.
 
 ## Main design decisions
 
 - **Tiles**: one per sign language, created and destroyed as plain DOM nodes. Reordering (loaded / failed / unavailable) moves existing nodes instead of rebuilding them, so a playing video is never interrupted.
 - **Strict matching**: programs are matched across languages by a language-agnostic key. A language without the program gets a black "not available" cell; the page never substitutes another video.
-- **Synchronized playback**: Play all / Sync pause every tile, wait for a decodable frame per tile, seek them to a common timestamp, then start them together. A shared position slider and −10 s / +10 s buttons move every tile together (the APIs expose no chapter markers for non-Bible videos, so jumps are by relative position).
+- **Synchronized playback**: Play all / Sync pause every tile, wait for a decodable frame per tile, seek them to a common timestamp, then start them together (a tile with a Bible verse selected starts at its own verse marker instead). A shared position slider and −10 s / +10 s buttons move every tile together (the APIs expose no chapter markers for non-Bible videos, so jumps are by relative position).
 - **One audio stream at a time**: a single volume slider; unmuting any tile mutes the rest.
 - **Optional storage**: the selection and volume persist in `localStorage`, wrapped so a blocked or full store degrades to a stateless visit instead of breaking the page.
-- **Share links**: the current selection is encoded in the URL hash (`#l=CODES,c=SECTION,p=PUBLICATION`); every value is validated on restore, and the hash is consumed once so later edits save normally.
+- **Share links**: the current selection is encoded in the URL hash (`#l=CODES&c=SECTION&p=PUBLICATION`): the language list plus one shared collection and publication (not a per-tile mix). Every value is validated on restore, and the hash is consumed once so later edits save normally.
 - **Internationalization**: a small string table drives the English and Spanish interfaces; publication titles come from the English or Spanish jw.org listings, falling back to the sign-language title.
 
 ## Tests and CI

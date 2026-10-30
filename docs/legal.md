@@ -2,11 +2,11 @@
 
 ## What this repository contains
 
-This repository hosts the page code, its tests and its documentation. It hosts no jw.org media, transcripts or catalogue copies, and no third-party logos or brand assets.
+This repository hosts the page code, its tests and its documentation. It hosts no original or recognizable jw.org media, no transcripts, no catalogue copies, and no third-party logos or brand assets. The README screenshot shows only the interface with the video areas heavily blurred, so no recognizable jw.org video content is visible in it.
 
 ## How the page works
 
-When someone visits the page, their browser requests the catalogue, the media links and the videos directly from jw.org servers (the public API and the official CDN). Nothing is downloaded to this repository, rehosted, proxied, cached by the application, or tracked. Normal browser buffering still occurs, exactly as when watching on jw.org.
+When someone visits the page, their browser requests the catalogue, the media links and the videos directly from jw.org servers (the public API and the official CDN). Nothing is downloaded to this repository, rehosted or proxied; the application keeps only short-lived in-memory metadata caches during the visit, plus the browser's normal buffering.
 
 ## Terms of use
 
