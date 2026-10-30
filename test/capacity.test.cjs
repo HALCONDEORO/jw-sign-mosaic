@@ -68,3 +68,57 @@ test('no UI string is hardcoded in only one language in the tile template',()=>{
   assert.doesNotMatch(tileTpl,/title="[^$"]*[A-Za-z]/,'tile template tooltips must come from t()');
   assert.doesNotMatch(tileTpl,/>\s*[A-Za-z][^<{}$]*</,'tile template static text must come from t()');
 });
+
+// --- sorting: tiles with the publication first, unavailable last ---
+const sortSrc=script.match(/function sortTiles\(\) \{[\s\S]*?\n\}/)[0];
+const mkTile=(nv)=>({classList:{contains:(c)=>c==='novideo'&&nv}});
+function runSort(flags){ // flags: true = novideo
+  const calls=[];
+  const grid={appendChild:(node)=>calls.push(nodes.indexOf(node))};
+  const nodes=flags.map(mkTile);
+  const tiles=new Map(flags.map((f,i)=>['L'+i,{tile:nodes[i]}]));
+  const ctx=vm.createContext({grid,tiles});
+  vm.runInContext(sortSrc+'\nsortTiles();',ctx);
+  return calls;
+}
+test('sortTiles keeps playable tiles first, unavailable last, stable within groups',()=>{
+  assert.deepEqual(runSort([false,true,false,true,false,true]),[0,2,4,1,3,5]);
+  assert.deepEqual(runSort([false,false,false]),[0,1,2]);
+  assert.deepEqual(runSort([true,true]),[0,1]);
+});
+test('sortTiles reorders DOM nodes without rebuilding tiles or videos',()=>{
+  assert.match(sortSrc,/grid\.appendChild\(x\.tile\)/,'moves existing nodes only');
+  assert.doesNotMatch(sortSrc,/innerHTML|createElement|remove\(\)|load\(\)/,'never rebuilds or reloads');
+});
+test('re-sort runs whenever a selection changes',()=>{
+  const loads=script.match(/function loadTileProgram[\s\S]*?\n\}/)[0];
+  assert.match(loads,/sortTiles\(\)/,'individual tile change re-sorts');
+  const unavail=script.match(/function markUnavailable[\s\S]*?\n\}/)[0];
+  assert.match(unavail,/sortTiles\(\)/,'unavailable tile re-sorts');
+  assert.doesNotMatch(script,/sortTiles\(\)[\s\S]{0,60}video\.(pause|load)/,'sort never stops playback');
+});
+test('sorting keeps every tile, none removed',()=>{
+  assert.doesNotMatch(sortSrc,/delete|removeChild/,'sortTiles removes nothing');
+});
+
+// --- global apply resolves all tiles in parallel with bounded concurrency ---
+test('apply-to-all resolves tiles in parallel, not one by one',()=>{
+  const apply=script.match(/globApply'\)\.addEventListener\('click', async \(\) => \{[\s\S]*?\n\}\);/)[0];
+  assert.match(apply,/Promise\.all/,'waits a pool of workers');
+  assert.match(apply,/Math\.min\(6, queue\.length\)/,'bounded concurrency pool');
+  assert.doesNotMatch(apply,/setTimeout/,'no artificial per-tile delay');
+  assert.match(apply,/markUnavailable\(x\)/,'still reports, never substitutes');
+});
+
+// --- remove-all button ---
+test('remove-all button exists, translated and guarded',()=>{
+  assert.ok(html.includes('id="rmAll"'),'button in the controls row');
+  assert.match(script,/getElementById\('rmAll'\)\.textContent = t\('rmAll'\)/,'translated in applyI18n');
+  for(const k of ['rmAll','confirmRmAll']){assert.ok(dictKeys('es').includes(k)&&dictKeys('en').includes(k),k+' in both dictionaries');}
+  const h=script.match(/getElementById\('rmAll'\)\.addEventListener\('click'[\s\S]*?\n\}\);/)[0];
+  assert.match(h,/confirm\(t\('confirmRmAll'\)\)/,'asks first');
+  assert.match(h,/if \(!tiles\.size\) return/,'no-op when empty');
+  assert.match(h,/tiles\.clear\(\)/,'clears every tile');
+  assert.match(h,/x\.video\.pause\(\)/,'stops playback explicitly');
+  assert.doesNotMatch(h,/location\.reload/,'never reloads the page');
+});
