@@ -34,8 +34,13 @@
   video { display:block; width:100%; aspect-ratio:16/9; }
   .status { padding:10px; color:var(--muted); font-size:13px; }
   .status.err { color:#f85149; }
-  .tile.novideo { opacity:.55; }
-  .tile.novideo .videowrap { display:none; }
+  .tile.novideo { opacity:.8; }
+  .tile select.partial { border-color:#d29922; }
+  .nomsg { display:none; }
+  .tile.novideo video { display:none; }
+  .tile.novideo .nomsg { display:flex; aspect-ratio:16/9; align-items:center; justify-content:center; text-align:center; padding:12px; background:#000; color:#e6edf3; font-weight:600; font-size:15px; }
+  .tile.indet .nomsg { visibility:hidden; }
+  .tile.novideo .status:not(.err) { display:none !important; }
   .tile.novideo .status { color:var(--muted); font-style:italic; }
   footer { padding:12px 18px; color:var(--muted); font-size:12px; border-top:1px solid var(--border); }
   .addwrap { position:relative; }
@@ -69,9 +74,14 @@
   <button id="pauseAll">⏸</button>
   <button id="syncAll">⟳</button>
   <span class="counter" id="counter" aria-live="polite"></span>
+  <span class="counter" id="notice" role="status"></span>
+  <label class="counter" for="vol" id="tVol"></label>
+  <input id="vol" type="range" min="0" max="1" step="0.05" value="1" style="width:110px;padding:0">
   <button id="addAll"></button>
   <button id="stopAdd" hidden></button>
+  <button id="retryFailed" hidden></button>
   <button id="rmAll"></button>
+  <button id="shareBtn"></button>
   <span id="addProgress" role="status"></span>
   <span style="flex:1"></span>
   <div class="addwrap">
@@ -88,6 +98,13 @@
   <select id="globProg" aria-label="Publication for all tiles"></select>
   <button id="globApply"></button>
 </div>
+<div class="globrow" id="jumpRow">
+  <span id="tJump"></span>
+  <input id="jumpSlider" type="range" min="0" max="1000" value="0" style="flex:1;min-width:140px;padding:0" aria-label="Position">
+  <span id="jumpPct" style="min-width:3.5em">0%</span>
+  <button id="back10"></button>
+  <button id="fwd10"></button>
+</div>
 <p id="capacityNote" style="margin:10px 18px;color:var(--muted);font-size:13px"></p>
 <div id="grid"></div>
 <footer id="tFooter"></footer>
@@ -97,6 +114,7 @@ const API = 'https://data.jw-api.org/mediator/v1';
 // No fixed tile limit. Device capacity, media availability and bandwidth still apply.
 let addingAll = false;
 let stopAddingAll = false;
+let mosaicGen = 0; // bumped by Remove all: an Add-all loop or a pending load that started earlier must not add or revive tiles
 const I18N = {
   es: {
     title: 'Mosaico de Lenguas de Signos', htmlLang: 'es',
@@ -110,7 +128,7 @@ const I18N = {
     slowMsg: 'Sigue sin cargar. Toca aquí para reintentar.',
     noEquiv: 'Esta publicación no está disponible en esta lengua.',
     loadErr: e => 'Error al cargar (' + e + ')',
-    failMsg: 'No se pudo cargar el vídeo. Pulsa Reproducir todos para reintentar.',
+    failMsg: 'No se pudo cargar el vídeo. Toca aquí o usa Reintentar fallidas.',
     noVideoPub: 'Sin vídeo de esta publicación en esta lengua.',
     noMp4: 'Sin MP4 compatible.',
     addAll: 'Añadir todas las lenguas del catálogo…', stopAdd: 'Detener adición',
@@ -123,6 +141,15 @@ const I18N = {
     audioTip: 'Escuchar esta lengua', fsTip: 'Pantalla completa', rmTip: 'Quitar',
     langListLbl: 'Lenguas de signos', langEsTip: 'Cambiar a español', langEnTip: 'Cambiar a inglés',
     rmAll: '✕ Quitar todas', confirmRmAll: 'Quitar todas las lenguas del mosaico. Los vídeos se detendrán. ¿Continuar?',
+    syncing: 'Empezando todas a la vez…',
+    syncSkipped: n => n + ' sin cargar aún; pulsa Sincronizar cuando estén listas.',
+    volLbl: 'Volumen',
+    shareBtn: '🔗 Copiar enlace', shareCopied: 'Enlace copiado.', sharePrompt: 'Copia este enlace:',
+    jumpLbl: 'Saltar todas a la misma posición:', back10: '−10 s', fwd10: '+10 s', posLbl: 'Posición',
+    retryFailed: n => '↻ Reintentar fallidas (' + n + ')',
+    partialTip: 'La lista de publicaciones está incompleta. Usa Reintentar fallidas.',
+    listIncomplete: 'La lista está incompleta y no se encontró la publicación elegida. Toca aquí o usa Reintentar fallidas.',
+    naText: 'No disponible en esta lengua',
     footer: 'Vídeos servidos directamente desde los servidores de jw.org (API pública y CDN). Herramienta personal, sin afiliación ni respaldo oficial. La reproducción simultánea depende de la disponibilidad del vídeo y de tu dispositivo.'
   },
   en: {
@@ -137,7 +164,7 @@ const I18N = {
     slowMsg: 'Still not loading. Tap here to retry.',
     noEquiv: 'This publication is not available in this language.',
     loadErr: e => 'Load error (' + e + ')',
-    failMsg: 'The video failed to load. Press Play all to retry.',
+    failMsg: 'The video failed to load. Tap here or use Retry failed.',
     noVideoPub: 'No video of this publication in this language.',
     noMp4: 'No compatible MP4.',
     addAll: 'Add all catalogue languages…', stopAdd: 'Stop adding',
@@ -150,6 +177,15 @@ const I18N = {
     audioTip: 'Listen to this language', fsTip: 'Fullscreen', rmTip: 'Remove',
     langListLbl: 'Sign languages', langEsTip: 'Switch to Spanish', langEnTip: 'Switch to English',
     rmAll: '✕ Remove all', confirmRmAll: 'Remove every language from the mosaic. Playback will stop. Continue?',
+    syncing: 'Starting all together…',
+    syncSkipped: n => n + ' not loaded yet; press Sync when they are ready.',
+    volLbl: 'Volume',
+    shareBtn: '🔗 Copy link', shareCopied: 'Link copied.', sharePrompt: 'Copy this link:',
+    jumpLbl: 'Jump all to the same position:', back10: '−10 s', fwd10: '+10 s', posLbl: 'Position',
+    retryFailed: n => '↻ Retry failed (' + n + ')',
+    partialTip: 'The publication list is incomplete. Use Retry failed.',
+    listIncomplete: 'The list is incomplete and the chosen publication was not found. Tap here or use Retry failed.',
+    naText: 'Not available in this language',
     footer: 'Videos served directly from jw.org servers (public API and CDN). Personal tool, not affiliated or endorsed. Simultaneous playback depends on video availability and your device.'
   }
 };
@@ -179,6 +215,12 @@ const grid = document.getElementById('grid');
 const tiles = new Map(); // code -> entry
 let ALL_SIGN_LANGS = [];
 
+// The publication the user chose for the whole mosaic. New tiles use it strictly, so a tile never falls back to "the first video".
+let SEL = { coll: '', key: '' };
+function sanitizeSel(s) {
+  const ok = s && typeof s.coll === 'string' && typeof s.key === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(s.key) && /^[A-Za-z0-9]{1,40}$/.test(s.coll);
+  return ok ? { coll: s.coll, key: s.key } : { coll: '', key: '' };
+}
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
@@ -191,8 +233,9 @@ function loadState() {
   return { langs: DEFAULT_CODES.map(c => ({ code: c })) };
 }
 function saveState() {
-  const langs = [...tiles.values()].map(x => ({ code: x.code, coll: x.coll, prog: x.prog }));
-  localStorage.setItem(LS_KEY, JSON.stringify({ langs }));
+  // want = the publication a tile was asked for but could not show; without it a reload would load the first video
+  const langs = [...tiles.values()].map(x => ({ code: x.code, coll: x.coll, prog: x.prog, want: x.want || '' }));
+  localStorage.setItem(LS_KEY, JSON.stringify({ langs, sel: SEL }));
 }
 function updateCounter() { document.getElementById('counter').textContent = t('counter')(tiles.size); }
 function sortTiles() { // tiles with the publication first, unavailable last; stable, keeps playback
@@ -207,6 +250,46 @@ function setStatus(entry, key, arg, isErr) { // every visible status comes from 
   entry.status.classList.toggle('err', !!isErr);
   const v = t(key);
   entry.status.textContent = (typeof v === 'function') ? v(arg) : v;
+  updateRetryUI();
+}
+function statusFailed(x) { return x.status.style.display !== 'none' && x.status.classList.contains('err'); }
+function isFailed(x) { return !!x.partial || statusFailed(x); }
+function updateRetryUI() {
+  const btn = document.getElementById('retryFailed');
+  const n = [...tiles.values()].filter(isFailed).length;
+  btn.hidden = !n;
+  if (n) btn.textContent = t('retryFailed')(n);
+}
+function cancelRetry(x) { clearTimeout(x.retryTimer); x.retryTimer = null; }
+function scheduleRetry(x, ms) { // one automatic reload of a failed source; dropped when the tile is removed or its source changes
+  const src = x.video.src;
+  cancelRetry(x);
+  x.retryTimer = setTimeout(() => {
+    x.retryTimer = null;
+    if (tiles.get(x.code) !== x || x.video.src !== src) return; // removed, or another source was chosen meanwhile
+    x.video.src = src; x.video.load(); if (x.armWatchdog) x.armWatchdog();
+  }, ms);
+}
+async function retryEntry(x) {
+  if (tiles.get(x.code) !== x) return; // removed while queued
+  const failedVideo = statusFailed(x);
+  if (x.partial && (!failedVideo || x.video.src)) await fillPrograms(x, x.prog, false, false, true); // incomplete list: refetch it without touching the playing video
+  if (!failedVideo) return;
+  if (x.resetRetry) x.resetRetry();
+  x.syncSkipSrc = ''; // a valid retry may resume this tile
+  if (x.video.src) { // the file is known: just reload it
+    x.shouldPlay = false; // a retried tile reloads paused; Play all or Sync starts it with the others
+    setStatus(x, 'loading'); x.video.load(); if (x.armWatchdog) x.armWatchdog();
+  } else { // the listing never arrived: fetch it again, keeping the chosen publication
+    setStatus(x, 'loading');
+    await fillPrograms(x, x.prog || x.want, !!(x.prog || x.want));
+  }
+}
+async function retryFailed() {
+  const queue = [...tiles.values()].filter(isFailed);
+  const worker = async () => { while (queue.length) await retryEntry(queue.shift()); };
+  await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker)); // only the failed tiles, 4 at a time
+  updateRetryUI();
 }
 function labelFor(code) {
   const l = ALL_SIGN_LANGS.find(x => x.code === code);
@@ -238,11 +321,40 @@ async function fetchCollection(code, collKey) {
           for (const m of (scat.media || []).filter(x => x.type === 'video')) {
             out.push({ naturalKey: m.naturalKey, title: m.title, group: sub.name || sub.key, media: m, agnostic: m.languageAgnosticNaturalKey });
           }
-        } catch (e) { /* empty collection for this language */ }
+        } catch (e) { out.partial = true; } // this subcategory failed: keep what we have and let the user retry
       }
     }
-  } catch (e) { return []; }
+  } catch (e) { out.failed = true; } // request failed: different from a catalogue that is genuinely empty
   return out;
+}
+
+// ---- Titles in the interface language -------------------------------------------------------------
+// A sign-language listing carries titles in that language's own locale (Spanish SL -> Spanish, ASL -> English). Labels follow the
+// interface language instead: the English or Spanish listing first, then an English-/Spanish-locale sign language for items
+// that exist only in sign languages (e.g. the older songbook). Anything still unmatched keeps its own title.
+const UI_SOURCES = { en: ['E', 'ASL'], es: ['S', 'LSE'] };
+const titleCache = new Map();
+function titleKey(it) { return normKey(it).replace(/^pub-sjj_/, 'pub-sjjm_'); } // same songs, renamed songbook
+function uiTitles(coll) { // Promise<Map titleKey -> {title, group}>; failures are not cached
+  const lang = LANG, ck = lang + '|' + coll;
+  if (!titleCache.has(ck)) {
+    const p = Promise.all(UI_SOURCES[lang].map(code => fetchCollection(code, coll))).then(lists => {
+      const m = new Map();
+      for (const items of lists) for (const it of items) { const k = titleKey(it); if (k && !m.has(k)) m.set(k, { title: it.title, group: it.group }); }
+      if (lists.some(l => l.failed)) titleCache.delete(ck); // a partial result is not kept: the next call refetches
+      return m;
+    }).catch(() => { titleCache.delete(ck); return new Map(); });
+    titleCache.set(ck, p);
+  }
+  return titleCache.get(ck);
+}
+function localTitle(it, tm) { const e = tm && tm.get(titleKey(it)); return e && e.title ? e.title : it.title; }
+function localGroup(it, tm) { const e = tm && tm.get(titleKey(it)); return e && e.group ? e.group : it.group; }
+async function relabelTile(x) { // interface language changed: relabel the existing options in place, the video is not touched
+  const tm = await uiTitles(x.coll);
+  const byKey = new Map((x.items || []).map(it => [it.naturalKey, it]));
+  for (const o of x.sel.querySelectorAll('option')) { const it = byKey.get(o.value); if (it) o.textContent = localTitle(it, tm); }
+  for (const og of x.sel.querySelectorAll('optgroup')) { const first = (x.items || []).find(it => it.group === og.dataset.g); if (first) og.label = localGroup(first, tm); }
 }
 
 function pickFile(media) {
@@ -260,28 +372,165 @@ function pickFile(media) {
 
 function normKey(it) { return (it && (it.agnostic || it.naturalKey)) ? String(it.agnostic || it.naturalKey).replace(/_[A-Z]{2,5}(_\d+_VIDEO)$/, '\$1') : ''; }
 function allVideos() { return [...tiles.values()].map(x => x.video); }
-
-function muteOthers(except) {
-  for (const x of tiles.values()) {
-    const on = (x === except);
-    x.video.muted = !on;
-    x.audioBtn.textContent = on ? '🔊' : '🔇';
+function activeVideos() { return [...tiles.values()].filter(x => x.video.src && !x.video.error && !x.tile.classList.contains('novideo')).map(x => x.video); }
+// Common start time: the furthest timestamp, kept inside the shortest video.
+function syncTarget(times, durations) {
+  const ts = times.filter(Number.isFinite);
+  const ds = durations.filter(d => Number.isFinite(d) && d > 0);
+  if (!ts.length) return 0;
+  const hi = Math.max(...ts);
+  return ds.length ? Math.max(0, Math.min(hi, Math.min(...ds) - 1)) : hi;
+}
+function waitReady(v, ms) { // resolves true when the first frame is available, false on timeout
+  return new Promise(res => {
+    if (v.readyState >= 2) return res(true);
+    const done = ok => { clearTimeout(tm); v.removeEventListener('loadeddata', on); res(ok); };
+    const on = () => done(true);
+    const tm = setTimeout(() => done(false), ms);
+    v.addEventListener('loadeddata', on);
+  });
+}
+function seekTo(v, time, ms = 5000) { // true only when the browser confirmed the seek; false on timeout
+  return new Promise(res => {
+    if (Math.abs(v.currentTime - time) < 0.05) return res(true);
+    const done = ok => { clearTimeout(tm); v.removeEventListener('seeked', on); res(ok); };
+    const on = () => done(true);
+    const tm = setTimeout(() => done(false), ms);
+    v.addEventListener('seeked', on);
+    v.currentTime = time;
+  });
+}
+function positionFor(frac, duration) { // same relative position, kept just inside the video
+  if (!Number.isFinite(duration) || duration <= 0) return null;
+  return Math.min(Math.max(0, frac), 1) * Math.max(0, duration - 1);
+}
+function skipTarget(times, durations, delta) {
+  const ds = durations.filter(d => Number.isFinite(d) && d > 0);
+  const base = syncTarget(times, durations);
+  return Math.max(0, ds.length ? Math.min(base + delta, Math.min(...ds) - 1) : base + delta);
+}
+let jumpDragging = false;
+async function jumpAllTo(frac) {
+  const vs = activeVideos().filter(v => Number.isFinite(v.duration));
+  await Promise.all(vs.map(v => seekTo(v, positionFor(frac, v.duration))));
+}
+async function skipAll(delta) { // moves every tile to one common timestamp, so it also realigns them
+  const vs = activeVideos().filter(v => Number.isFinite(v.duration));
+  if (!vs.length) return;
+  const target = skipTarget(vs.map(v => v.currentTime), vs.map(v => v.duration), delta);
+  await Promise.all(vs.map(v => seekTo(v, target)));
+}
+function flashNotice(text, ms) {
+  const n = document.getElementById('notice');
+  n.textContent = text;
+  if (ms) setTimeout(() => { if (n.textContent === text) n.textContent = ''; }, ms);
+}
+// Pause everything, wait until every tile can show a frame, seek all to one timestamp, then press play in the same tick.
+const SYNC_TIMEOUTS = { ready: 10000, seek: 5000, settle: 5000 };
+let syncGen = 0, syncing = false, userPaused = false;
+function cancelSync() { syncGen++; syncing = false; flashNotice(''); } // any pending startTogether stops before its next seek or play
+function snapshotOf(vs) { return vs.map(v => ({ v, src: v.src })); }
+function entryOf(v) { return [...tiles.values()].find(x => x.video === v); }
+// A skipped tile remembers the source it was skipped with; auto-resume leaves it paused until a new Sync, Retry or a new source.
+function markSkipped(s) { const x = entryOf(s.v); if (x) x.syncSkipSrc = s.src; }
+function stillValid(s) { // same tile, same source, no error, tile not marked unavailable
+  return [...tiles.values()].some(x => x.video === s.v && !x.tile.classList.contains('novideo')) && s.v.src === s.src && !s.v.error;
+}
+// Pause everything, wait until every tile can show a frame, seek all to one timestamp, verify it, then press play in the same tick.
+// A tile whose readiness, seek or readback is not confirmed is skipped and reported, never played out of sync.
+async function startTogether() {
+  const gen = ++syncGen;
+  syncing = true; userPaused = false;
+  const cancelled = () => gen !== syncGen;
+  let skipped = 0;
+  try {
+    for (const x of tiles.values()) x.syncSkipSrc = ''; // a new run re-evaluates every tile
+    const all = snapshotOf(activeVideos());
+    let snaps = all;
+    if (!snaps.length) return;
+    const total = snaps.length;
+    flashNotice(t('syncing'));
+    snaps.forEach(s => s.v.pause());
+    const ready = await Promise.all(snaps.map(s => waitReady(s.v, SYNC_TIMEOUTS.ready)));
+    if (cancelled()) return;
+    snaps = snaps.filter((s, i) => ready[i] && stillValid(s));
+    if (!snaps.length) { skipped = total; all.forEach(markSkipped); return; }
+    const target = syncTarget(snaps.map(s => s.v.currentTime), snaps.map(s => s.v.duration));
+    const seeked = await Promise.all(snaps.map(s => seekTo(s.v, target, SYNC_TIMEOUTS.seek)));
+    if (cancelled()) return;
+    snaps = snaps.filter((s, i) => seeked[i] && stillValid(s));
+    const settled = await Promise.all(snaps.map(s => waitReady(s.v, SYNC_TIMEOUTS.settle)));
+    if (cancelled()) return;
+    snaps = snaps.filter((s, i) => settled[i] && stillValid(s) && s.v.readyState >= 2 && Math.abs(s.v.currentTime - target) <= 0.5);
+    const played = await Promise.all(snaps.map(s => s.v.play().then(() => true, () => false))); // a rejected play() is not a sync either
+    const ok = new Set(snaps.filter((s, i) => played[i]));
+    skipped = total - ok.size;
+    all.filter(s => !ok.has(s)).forEach(markSkipped);
+    ok.forEach(s => { const x = entryOf(s.v); if (x) x.shouldPlay = true; });
+  } finally {
+    if (!cancelled()) { syncing = false; flashNotice(skipped ? t('syncSkipped')(skipped) : '', skipped ? 8000 : 0); }
   }
 }
 
-function markUnavailable(entry, msgKey) { // never substitute another video: report it and leave the tile empty
+const VOL_KEY = 'jwSignMosaic.vol';
+function clampVolume(x) { const n = Number(x); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1; }
+const savedVol = localStorage.getItem(VOL_KEY);
+let masterVol = clampVolume(savedVol === null ? 1 : savedVol);
+let audible = null; // the only tile that may produce sound
+function muteOthers(except) { // pass null to silence every tile
+  audible = except || null;
+  for (const x of tiles.values()) {
+    const on = (x === audible);
+    x.video.muted = !on;
+    x.video.volume = masterVol;
+    x.audioBtn.textContent = on ? '🔊' : '🔇';
+  }
+}
+function setMasterVolume(v) {
+  masterVol = clampVolume(v);
+  document.getElementById('vol').value = masterVol;
+  localStorage.setItem(VOL_KEY, String(masterVol));
+  for (const x of tiles.values()) x.video.volume = masterVol;
+}
+// The native player controls can also unmute a tile or change its volume: keep one audible tile and one volume.
+function onNativeVolume(entry) {
+  const v = entry.video;
+  if (!v.muted && audible !== entry) { setMasterVolume(v.volume); muteOthers(entry); } // adopt the tile's own volume before muteOthers rewrites it
+  else if (v.muted && audible === entry) muteOthers(null);
+  else if (audible === entry && Math.abs(v.volume - masterVol) > 0.001) setMasterVolume(v.volume);
+}
+document.getElementById('vol').addEventListener('input', e => setMasterVolume(e.target.value));
+
+function markUnavailable(entry, want, msgKey) { // never substitute another video: report it and leave the tile empty
   const { status, tile, video, sel } = entry;
   sel.selectedIndex = -1;
   entry.prog = '';
+  entry.shouldPlay = false;
+  entry.want = want || entry.want || SEL.key || '';
+  tile.classList.remove('indet');
   tile.classList.add('novideo');
   video.pause(); video.removeAttribute('src'); video.load();
   setStatus(entry, msgKey || 'noEquiv');
   saveState(); refreshGlobalPicker(); sortTiles();
 }
 
+function holdIndeterminate(entry, prog) { // the list is incomplete, so "not found" proves nothing: keep the request and let Retry resolve it
+  entry.prog = prog;
+  entry.want = prog;
+  entry.tile.classList.add('novideo', 'indet');
+  entry.video.pause(); entry.video.removeAttribute('src'); entry.video.load();
+  setStatus(entry, 'listIncomplete', undefined, true);
+  saveState(); sortTiles();
+}
+
 async function loadTileProgram(entry, item) {
   const { video, status, tile } = entry;
+  if (tiles.get(entry.code) !== entry) return; // the tile was removed while its list was loading: never revive it
+  cancelRetry(entry); // a pending automatic reload belongs to the old source
   entry.prog = item ? item.naturalKey : '';
+  entry.shouldPlay = false; // a new source always loads paused
+  if (item) entry.want = '';
+  tile.classList.remove('indet');
   if (!item) {
     tile.classList.add('novideo');
     video.pause(); video.removeAttribute('src'); video.load();
@@ -294,39 +543,48 @@ async function loadTileProgram(entry, item) {
     const src = pickFile(item.media || {});
     if (src) {
       setStatus(entry, 'loading');
-      video.src = src; video.load(); video.play().catch(() => {});
+      video.src = src; video.load(); // load paused; playback starts only from Play all / Sync
       if (entry.armWatchdog) entry.armWatchdog();
     } else { setStatus(entry, 'noMp4', undefined, true); }
   } catch (e) { setStatus(entry, 'loadErr', e.message, true); }
   saveState(); refreshGlobalPicker(); sortTiles();
 }
 
-async function fillPrograms(entry, keepProg, strict, deferLoad) {
+async function fillPrograms(entry, keepProg, strict, deferLoad, listOnly) {
   const { code, sel } = entry;
+  const lang0 = LANG;
+  let [items, tm] = await Promise.all([fetchCollection(code, entry.coll), uiTitles(entry.coll)]);
+  if (lang0 !== LANG) tm = await uiTitles(entry.coll); // the interface language changed while loading
+  if (items.failed && listOnly) return; // keep the old list when a refresh fails
   sel.innerHTML = '';
-  const items = await fetchCollection(code, entry.coll);
   entry.items = items;
+  entry.partial = !!items.partial;
+  sel.classList.toggle('partial', entry.partial);
+  sel.title = entry.partial ? t('partialTip') : '';
+  updateRetryUI();
+  if (items.failed) { setStatus(entry, 'loadErr', 'network', true); return; }
   const groups = new Map();
   for (const it of items) { // no truncation: the meeting songbook has 163 videos
     if (!groups.has(it.group)) groups.set(it.group, []);
     groups.get(it.group).push(it);
   }
   for (const [g, arr] of groups) {
-    const parent = g ? (() => { const og = document.createElement('optgroup'); og.label = g; sel.appendChild(og); return og; })() : sel;
+    const parent = g ? (() => { const og = document.createElement('optgroup'); og.dataset.g = g; og.label = localGroup(arr[0], tm); sel.appendChild(og); return og; })() : sel;
     for (const it of arr) {
       const o = document.createElement('option');
       o.value = it.naturalKey;
-      o.textContent = it.title;
+      o.textContent = localTitle(it, tm);
       parent.appendChild(o);
     }
   }
+  if (listOnly) { sel.selectedIndex = items.findIndex(it => it.naturalKey === entry.prog); return; } // refresh the list only: the video keeps playing
   let idx = 0;
   if (keepProg) {
     const nk = normKey({ naturalKey: keepProg });
     const found = items.findIndex(it => it.naturalKey === keepProg || (nk && normKey(it) === nk));
     if (found >= 0) idx = found;
-    else if (strict) { // a specific publication was requested and has no equivalent in this language
-      markUnavailable(entry);
+    else { // a specific publication was requested and has no equivalent in this language: never show another video
+      if (items.partial) holdIndeterminate(entry, keepProg); else markUnavailable(entry, keepProg);
       return;
     }
   }
@@ -363,43 +621,43 @@ async function addTile(lang) {
   }
 
   const video = document.createElement('video');
-  video.muted = true; video.autoplay = true; video.playsInline = true; video.controls = true; video.preload = 'auto';
+  video.muted = true; video.autoplay = false; video.playsInline = true; video.controls = true; video.preload = 'auto';
   video.setAttribute('aria-label', langLabel);
   wrap.appendChild(video);
+  const nomsg = document.createElement('div'); nomsg.className = 'nomsg'; nomsg.textContent = t('naText'); wrap.appendChild(nomsg);
   let loadTimer = null;
   const armWatchdog = () => {
     clearTimeout(loadTimer);
     loadTimer = setTimeout(() => {
-      if (video.src && !video.error && video.readyState < 3 && !tile.classList.contains('novideo')) {
+      if (video.src && !video.error && video.readyState < 2 && !tile.classList.contains('novideo')) {
         setStatus(entry, 'slowMsg', undefined, true);
       }
     }, 12000);
   };
-  video.addEventListener('playing', () => { clearTimeout(loadTimer); status.style.display = 'none'; });
+  const loaded = () => { clearTimeout(loadTimer); status.style.display = 'none'; updateRetryUI(); };
+  video.addEventListener('playing', loaded);
+  video.addEventListener('loadeddata', loaded); // first frame ready: the tile is loaded and waits paused
   let retried = false;
   video.addEventListener('error', () => {
     clearTimeout(loadTimer);
     if (!retried && video.src) {
       retried = true;
       setStatus(entry, 'retrying');
-      const src = video.src;
-      setTimeout(() => { video.src = src; video.load(); video.play().catch(() => {}); armWatchdog(); }, 3000);
+      scheduleRetry(entry, 3000);
     } else {
       setStatus(entry, 'failMsg', undefined, true);
     }
   });
+  const resetRetry = () => { retried = false; };
   status.style.cursor = 'pointer';
   status.addEventListener('click', () => {
-    if (status.classList.contains('err') && video.src) {
-      setStatus(entry, 'loading');
-      video.load(); video.play().catch(() => {}); armWatchdog();
-    }
+    if (status.classList.contains('err')) retryEntry(entry); // same path as the Retry failed button
   });
 
   selColl.setAttribute('aria-label', t('collLbl') + ' — ' + langLabel);
   sel.setAttribute('aria-label', t('progLbl') + ' — ' + langLabel);
   const entry = { code: lang.code, coll: lang.coll || 'StudioMonthlyPrograms', prog: lang.prog || '',
-                  video, audioBtn: tile.querySelector('.audio'), tile, sel, selColl, status, items: [], armWatchdog, statusKey: 'loading' };
+                  video, audioBtn: tile.querySelector('.audio'), tile, sel, selColl, status, items: [], armWatchdog, resetRetry, nomsg, want: lang.want || '', statusKey: 'loading' };
   tiles.set(lang.code, entry);
   selColl.value = entry.coll;
   updateCounter(); saveState(); refreshGlobalPicker();
@@ -407,31 +665,41 @@ async function addTile(lang) {
   selColl.addEventListener('change', async () => { entry.coll = selColl.value; entry.prog = ''; await fillPrograms(entry, ''); });
   sel.addEventListener('change', async () => {
     const it = entry.items.find(x => x.naturalKey === sel.value);
+    if (it) SEL = { coll: entry.coll, key: normKey(it) };
     await loadTileProgram(entry, it);
   });
-  entry.audioBtn.addEventListener('click', () => muteOthers(entry));
+  entry.audioBtn.addEventListener('click', () => muteOthers(audible === entry ? null : entry));
+  video.addEventListener('volumechange', () => onNativeVolume(entry));
+  video.volume = masterVol;
   tile.querySelector('.fs').addEventListener('click', () => {
     if (document.fullscreenElement) document.exitFullscreen();
     else tile.requestFullscreen().catch(() => {});
   });
   tile.querySelector('.rm').addEventListener('click', () => {
-    video.pause(); video.removeAttribute('src'); video.load();
-    tiles.delete(lang.code); tile.remove();
+    cancelRetry(entry); video.pause(); video.removeAttribute('src'); video.load();
+    if (audible === entry) audible = null;
+    tiles.delete(lang.code); tile.remove(); updateRetryUI();
     updateCounter(); saveState(); refreshGlobalPicker(); renderAddList();
   });
 
-  // new language: inherit the publication already playing on the other tiles
+  // new language: use the mosaic selection strictly; only without any selection fall back to what the other tiles play
   let inheritProg = '';
-  if (!lang.coll && !lang.prog) {
-    const ref = [...tiles.values()].find(x => x.code !== lang.code && x.prog && x.items && x.items.length);
-    if (ref) {
-      const refIt = ref.items.find(y => y.naturalKey === ref.prog);
-      entry.coll = ref.coll;
-      selColl.value = ref.coll;
-      inheritProg = refIt ? refIt.naturalKey : '';
+  if (!lang.coll && !lang.prog && !lang.want) {
+    if (SEL.key) {
+      if (SEL.coll) { entry.coll = SEL.coll; selColl.value = SEL.coll; }
+      inheritProg = SEL.key;
+    } else {
+      const ref = [...tiles.values()].find(x => x.code !== lang.code && x.prog && x.items && x.items.length);
+      if (ref) {
+        const refIt = ref.items.find(y => y.naturalKey === ref.prog);
+        entry.coll = ref.coll;
+        selColl.value = ref.coll;
+        inheritProg = refIt ? refIt.naturalKey : '';
+      }
     }
   }
-  await fillPrograms(entry, entry.prog || inheritProg, !!inheritProg || !!lang.strictPublication || !!lang.prog);
+  const wantKey = entry.prog || entry.want || inheritProg;
+  await fillPrograms(entry, wantKey, !!wantKey);
 }
 
 let globProgReq = 0;
@@ -442,9 +710,9 @@ async function refreshGlobalPrograms(keepProg) {
   const first = [...tiles.values()][0];
   gp.innerHTML = '';
   if (!first || !gc.value) return;
-  const items = (first.coll === gc.value && first.items && first.items.length) ? first.items : await fetchCollection(first.code, gc.value);
+  const [items, tm] = await Promise.all([(first.coll === gc.value && first.items && first.items.length) ? first.items : fetchCollection(first.code, gc.value), uiTitles(gc.value)]);
   if (req !== globProgReq) return; // stale response: the user changed the selection again
-  for (const it of items) { const o = document.createElement('option'); o.value = normKey(it); o.textContent = it.title; gp.appendChild(o); }
+  for (const it of items) { const o = document.createElement('option'); o.value = normKey(it); o.textContent = localTitle(it, tm); gp.appendChild(o); }
   let idx = 0;
   if (keepProg) { const k = items.findIndex(it => normKey(it) === keepProg); if (k >= 0) idx = k; }
   gp.selectedIndex = idx;
@@ -469,13 +737,15 @@ document.getElementById('globColl').addEventListener('change', () => refreshGlob
 document.getElementById('globApply').addEventListener('click', async () => {
   const coll = document.getElementById('globColl').value;
   const nk = document.getElementById('globProg').value;
+  if (nk) SEL = { coll, key: nk };
   const applyOne = async (x) => {
     x.selColl.value = coll;
     if (x.coll !== coll) { x.coll = coll; x.prog = ''; await fillPrograms(x, '', false, true); }
     if (nk) {
       const it = x.items.find(y => normKey(y) === nk);
       if (it) { x.sel.value = it.naturalKey; await loadTileProgram(x, it); }
-      else markUnavailable(x); // the publication does not exist in this language: report it, never substitute
+      else if (x.partial) holdIndeterminate(x, nk); // incomplete list: not proof of absence, Retry resolves it
+      else markUnavailable(x, nk); // the publication does not exist in this language: report it, never substitute
     }
   };
   // Resolve every tile in parallel, with a bounded pool so jw.org and the device are not flooded.
@@ -530,6 +800,23 @@ document.getElementById('addSearch').addEventListener('input', renderAddList);
 function validLanguageCode(code) {
   return typeof code === 'string' && /^[A-Z][A-Z0-9]{0,19}$/.test(code);
 }
+function buildShareHash(codes, coll, prog) {
+  const p = new URLSearchParams();
+  p.set('l', codes.join(','));
+  if (coll) p.set('c', coll);
+  if (prog) p.set('p', prog);
+  return p.toString().replace(/%2C/g, ',');
+}
+// Returns { langs } or null. Every value is validated; nothing from the URL is trusted.
+function parseShareHash(hash, collKeys) {
+  const p = new URLSearchParams(String(hash || '').replace(/^#/, ''));
+  const codes = [];
+  for (const c of (p.get('l') || '').split(',')) if (validLanguageCode(c) && !codes.includes(c) && codes.length < 300) codes.push(c);
+  if (!codes.length) return null;
+  const coll = collKeys.includes(p.get('c')) ? p.get('c') : '';
+  const prog = /^[A-Za-z0-9_.-]{1,80}$/.test(p.get('p') || '') ? p.get('p') : '';
+  return { langs: codes.map(code => coll ? (prog ? { code, coll, prog } : { code, coll }) : { code }) };
+}
 function restoredLanguages(langs, catalog) {
   const seen = new Set();
   return (Array.isArray(langs) ? langs : []).filter(l => {
@@ -559,9 +846,10 @@ async function addCatalogLanguages() {
   button.disabled = true; stop.hidden = false;
   const reference = [...tiles.values()].find(x => x.prog && x.items.length);
   const publication = reference ? {coll:reference.coll, prog:reference.prog} : {};
+  const gen = mosaicGen;
   try {
     for (let i = 0; i < pending.length; i++) {
-      if (stopAddingAll) break;
+      if (stopAddingAll || gen !== mosaicGen) break;
       progress.textContent = t('adding')(i + 1, pending.length);
       // Snapshot the selected publication once; do not silently fall back for unavailable translations.
       const before = tiles.size;
@@ -569,6 +857,7 @@ async function addCatalogLanguages() {
       if (tiles.size > before) addedCount++;
       renderAddList();
       await new Promise(resolve => setTimeout(resolve, 400));
+      if (gen !== mosaicGen) break;
     }
   } finally {
     addingAll = false; button.disabled = false; stop.hidden = true;
@@ -576,13 +865,27 @@ async function addCatalogLanguages() {
   }
 }
 document.getElementById('addAll').addEventListener('click', addCatalogLanguages);
+document.getElementById('shareBtn').addEventListener('click', () => {
+  const list = [...tiles.values()];
+  if (!list.length) return;
+  const ref = list.find(x => x.prog) || list[0]; // the link carries one shared collection and publication
+  const url = location.origin + location.pathname + '#' + buildShareHash(list.map(x => x.code), ref.coll, ref.prog);
+  const fallback = () => window.prompt(t('sharePrompt'), url);
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(() => flashNotice(t('shareCopied'), 4000), fallback);
+  else fallback();
+});
+document.getElementById('retryFailed').addEventListener('click', retryFailed);
 document.getElementById('stopAdd').addEventListener('click', () => { stopAddingAll = true; });
-document.getElementById('rmAll').addEventListener('click', () => {
-  if (!tiles.size) return;
-  if (!confirm(t('confirmRmAll'))) return;
-  for (const x of tiles.values()) { x.video.pause(); x.video.removeAttribute('src'); x.video.load(); x.tile.remove(); }
-  tiles.clear();
+function removeAllTiles() {
+  mosaicGen++; stopAddingAll = true; // stop an Add-all loop that is still running
+  for (const x of [...tiles.values()]) { cancelRetry(x); x.video.pause(); x.video.removeAttribute('src'); x.video.load(); x.tile.remove(); }
+  tiles.clear(); audible = null; cancelSync(); updateRetryUI();
   updateCounter(); saveState(); refreshGlobalPicker(true); renderAddList();
+}
+document.getElementById('rmAll').addEventListener('click', () => {
+  if (!tiles.size && !addingAll) return;
+  if (!confirm(t('confirmRmAll'))) return;
+  removeAllTiles();
 });
 
 document.addEventListener('click', (e) => {
@@ -615,7 +918,15 @@ function applyI18n() {
   document.getElementById('langEN').setAttribute('aria-pressed', String(LANG === 'en'));
   document.getElementById('stopAdd').textContent = t('stopAdd');
   document.getElementById('rmAll').textContent = t('rmAll');
+  updateRetryUI();
+  document.getElementById('shareBtn').textContent = t('shareBtn');
   document.getElementById('capacityNote').textContent = t('capacity');
+  document.getElementById('tVol').textContent = t('volLbl');
+  document.getElementById('tJump').textContent = t('jumpLbl');
+  document.getElementById('back10').textContent = t('back10');
+  document.getElementById('fwd10').textContent = t('fwd10');
+  document.getElementById('jumpSlider').setAttribute('aria-label', t('posLbl'));
+  document.getElementById('vol').value = masterVol;
   document.getElementById('langES').classList.toggle('active', LANG === 'es');
   document.getElementById('langEN').classList.toggle('active', LANG === 'en');
   updateCounter();
@@ -635,6 +946,8 @@ function setLang(l) {
       const v = t(key);
       x.status.textContent = (typeof v === 'function') ? v(x.statusArg) : v;
     }
+    x.sel.title = x.partial ? t('partialTip') : '';
+    x.nomsg.textContent = t('naText');
     x.tile.querySelector('.audio').title = t('audioTip');
     x.tile.querySelector('.audio').setAttribute('aria-label', t('audioTip'));
     x.tile.querySelector('.fs').title = t('fsTip');
@@ -646,31 +959,54 @@ function setLang(l) {
     x.sel.setAttribute('aria-label', t('progLbl') + ' — ' + lbl);
   }
   refreshGlobalPicker(true);
+  for (const x of tiles.values()) relabelTile(x);
   renderAddList();
 }
 document.getElementById('langES').addEventListener('click', () => setLang('es'));
 document.getElementById('langEN').addEventListener('click', () => setLang('en'));
 
-document.getElementById('playAll').addEventListener('click', () => allVideos().forEach(v => v.play().catch(() => {})));
-document.getElementById('pauseAll').addEventListener('click', () => allVideos().forEach(v => v.pause()));
-document.getElementById('syncAll').addEventListener('click', () => {
-  const vs = allVideos().filter(v => !isNaN(v.duration));
-  if (!vs.length) return;
-  const t0 = Math.max(...vs.map(v => v.currentTime));
-  vs.forEach(v => { v.currentTime = t0; v.play().catch(() => {}); });
-});
+document.getElementById('playAll').addEventListener('click', startTogether);
+document.getElementById('pauseAll').addEventListener('click', () => { cancelSync(); userPaused = true; for (const x of tiles.values()) { x.shouldPlay = false; x.video.pause(); } });
+document.getElementById('syncAll').addEventListener('click', startTogether);
 
-setInterval(() => {
+setInterval(() => { // keep the slider on the first playing tile
+  const v = activeVideos().find(x => Number.isFinite(x.duration) && x.duration > 0);
+  if (!v || jumpDragging) return;
+  const f = v.currentTime / v.duration;
+  document.getElementById('jumpSlider').value = Math.round(f * 1000);
+  document.getElementById('jumpPct').textContent = Math.round(f * 100) + '%';
+}, 1000);
+const jumpSlider = document.getElementById('jumpSlider');
+jumpSlider.addEventListener('input', () => { jumpDragging = true; document.getElementById('jumpPct').textContent = Math.round(jumpSlider.value / 10) + '%'; });
+jumpSlider.addEventListener('change', async () => { await jumpAllTo(jumpSlider.value / 1000); jumpDragging = false; });
+document.getElementById('back10').addEventListener('click', () => skipAll(-10));
+document.getElementById('fwd10').addEventListener('click', () => skipAll(10));
+// Safety net: restart tiles that were playing (started by Play all / Sync) and that the browser paused on its own (throttling, stalls).
+// Tiles that never started, or were reloaded, stay paused.
+// It must never undo Pause all or interrupt a synchronized start.
+function autoResume() {
+  if (syncing || userPaused) return;
   for (const x of tiles.values()) {
-    if (x.video.src && x.video.paused && !x.tile.classList.contains('novideo')) x.video.play().catch(() => {});
+    if (x.shouldPlay && x.video.src && x.video.paused && x.syncSkipSrc !== x.video.src && !x.tile.classList.contains('novideo')) x.video.play().catch(() => {});
   }
-}, 15000);
+}
+setInterval(autoResume, 15000);
 
 (async function init() {
   applyI18n();
   await loadCatalog();
-  const state = loadState();
-  for (const l of restoredLanguages(state.langs, ALL_SIGN_LANGS)) {
+  const shared = parseShareHash(location.hash, collectionsFor().map(c => c[0]));
+  const state = shared || loadState();
+  SEL = sanitizeSel(state.sel);
+  if (shared && state.langs[0] && state.langs[0].prog) SEL = sanitizeSel({ coll: state.langs[0].coll, key: normKey({ naturalKey: state.langs[0].prog }) });
+  if (shared) history.replaceState(null, '', location.pathname + location.search); // the link is consumed once; later changes are saved normally
+  let restored = restoredLanguages(state.langs, ALL_SIGN_LANGS);
+  // Older saved states: a tile with no publication inside a collection where others play one was "not available", not "first video".
+  if (!SEL.key) { const ref = restored.find(l => l.prog); if (ref) SEL = sanitizeSel({ coll: ref.coll, key: normKey({ naturalKey: ref.prog }) }); }
+  if (SEL.key) restored = restored.map(l => (!l.prog && !l.want && l.coll === SEL.coll) ? { ...l, want: SEL.key } : l);
+  const gen0 = mosaicGen;
+  for (const l of restored) {
+    if (gen0 !== mosaicGen) break; // Remove all pressed while the saved tiles were still being restored
     await addTile({ ...l, label: l.label || labelFor(l.code) });
     await new Promise(r => setTimeout(r, 400)); // stagger: do not flood the network with N videos at once
   }
