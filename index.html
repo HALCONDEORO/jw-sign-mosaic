@@ -252,10 +252,19 @@ function saveState() {
   writeStored(LS_KEY, JSON.stringify({ langs, sel: SEL }));
 }
 function updateCounter() { document.getElementById('counter').textContent = t('counter')(tiles.size); }
-function sortTiles() { // tiles with the publication first, unavailable last; stable, keeps playback
-  const available = [], unavailable = [];
-  for (const x of tiles.values()) (x.tile.classList.contains('novideo') ? unavailable : available).push(x);
-  for (const x of [...available, ...unavailable]) grid.appendChild(x.tile); // moves the node, videos keep playing
+function tileGroup(x) { // 0 = loads fine, 1 = load error (retriable), 2 = no video in this language
+  if (x.status && x.status.style.display !== 'none' && x.status.classList.contains('err') && x.statusKey !== 'slowMsg') return 1;
+  return x.tile.classList.contains('novideo') ? 2 : 0;
+}
+function sortTiles() { // good tiles first, then load errors, then unavailable; stable inside each group, keeps playback
+  const groups = [[], [], []];
+  for (const x of tiles.values()) groups[tileGroup(x)].push(x);
+  const order = [].concat(...groups);
+  if (grid.children) { // already in order: touch nothing, so nothing jumps
+    const cur = [...grid.children];
+    if (cur.length === order.length && order.every((x, i) => cur[i] === x.tile)) return;
+  }
+  for (const x of order) grid.appendChild(x.tile); // moves the node, videos keep playing
 }
 
 function setStatus(entry, key, arg, isErr) { // every visible status comes from the active dictionary
@@ -264,7 +273,7 @@ function setStatus(entry, key, arg, isErr) { // every visible status comes from 
   entry.status.classList.toggle('err', !!isErr);
   const v = t(key);
   entry.status.textContent = (typeof v === 'function') ? v(arg) : v;
-  updateRetryUI();
+  updateRetryUI(); sortTiles();
 }
 function statusFailed(x) { return x.status.style.display !== 'none' && x.status.classList.contains('err'); }
 function isFailed(x) { return !!x.partial || statusFailed(x); }
@@ -734,7 +743,7 @@ async function addTile(lang) {
       }
     }, 12000);
   };
-  const loaded = () => { clearTimeout(loadTimer); status.style.display = 'none'; updateRetryUI(); };
+  const loaded = () => { clearTimeout(loadTimer); status.style.display = 'none'; updateRetryUI(); sortTiles(); };
   video.addEventListener('playing', loaded);
   video.addEventListener('loadedmetadata', () => { if (entry.startAt > 0 && Number.isFinite(video.duration) && entry.startAt < video.duration) video.currentTime = entry.startAt; }); // Bible verse start
   video.addEventListener('loadeddata', loaded); // first frame ready: the tile is loaded and waits paused
