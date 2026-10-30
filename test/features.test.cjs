@@ -285,7 +285,7 @@ function tileWorld(handler){
     grab(/function markUnavailable\([\s\S]*?\n}/),grab(/function holdIndeterminate\([\s\S]*?\n}/),grab(/function cancelRetry\([^\n]*\n/),grab(/async function loadTileProgram\([\s\S]*?\n}/),
     grab(/async function fillPrograms\([\s\S]*?\n}\n/),grab(/async function retryEntry\([\s\S]*?\n}/)].join('\n'),c);
   const video=new FV({src:''});video.removeAttribute=function(){this.src=''};video.load=function(){};
-  const entry={code:'LSE',coll:'VODStudio',prog:'pub-x_LSE_1_VIDEO',video,tile:el(),sel:el(),status:el(),items:[],armWatchdog(){},resetRetry(){}};
+  const entry={code:'LSE',coll:'VODStudio',prog:'pub-x_LSE_1_VIDEO',video,tile:el(),sel:el(),status:el(),items:[],note:{textContent:''},armWatchdog(){},resetRetry(){}};
   c.tiles.set('LSE',entry);
   return {c,entry,video};
 }
@@ -527,4 +527,142 @@ test('Pause all: after it nothing replays by itself, including tiles added later
   w.run('userPaused=false;autoResume()');assert.equal(a.played,1);assert.equal(late.played,0);
   // Play all starts everyone again, together
   await w.run('startTogether()');assert.equal(late.played,1);assert.equal(a.played,2);
+});
+
+// ---- Bible passage (book, chapter, verse) ----
+function bibleCtx(extra){
+  const c=vm.createContext(Object.assign({Map,Number,Math,String,Array,Object,Promise,JSON,encodeURIComponent,setTimeout,clearTimeout,LANG:'es'},extra||{}));
+  vm.runInContext([grab(/const PUBMEDIA[^\n]*/),grab(/const BIBLE_NAMES[^\n]*/),grab(/const BIBLE_CHAPTERS[^\n]*/),grab(/let BIBLE_TIMEOUT[^\n]*/),grab(/function bibleKey\([^\n]*/),grab(/function parseBibleKey\([\s\S]*?\n}\n/),grab(/function bibleLabel\([^\n]*/),grab(/function timeToSec\([^\n]*/),'const bibleCache = new Map();',grab(/function fetchBibleChapter\([\s\S]*?\n}\n/)].join('\n'),c);
+  return c;
+}
+test('Bible data: 66 books, 1189 chapters, names in ES and EN, strict keys',()=>{
+  const c=bibleCtx();const run=x=>vm.runInContext(x,c);
+  assert.equal(run('BIBLE_CHAPTERS.length'),66);assert.equal(run('BIBLE_CHAPTERS.reduce((a,b)=>a+b,0)'),1189);
+  assert.equal(run('BIBLE_NAMES.es.length'),66);assert.equal(run('BIBLE_NAMES.en.length'),66);
+  assert.equal(run('BIBLE_NAMES.es[42]'),'Juan');assert.equal(run('BIBLE_NAMES.en[42]'),'John');assert.equal(run('BIBLE_NAMES.es[18]'),'Salmos');
+  assert.equal(run("bibleKey(43,3,16)"),'bible_43_3_16');assert.equal(run("bibleKey(43,3,0)"),'bible_43_3');
+  assert.deepEqual(JSON.parse(run("JSON.stringify(parseBibleKey('bible_43_3_16'))")),{book:43,chapter:3,verse:16});
+  assert.deepEqual(JSON.parse(run("JSON.stringify(parseBibleKey('bible_19_150'))")),{book:19,chapter:150,verse:0});
+  for(const bad of ['bible_43_22','bible_67_1','bible_0_1','bible_43_0','bible_43_3_x','pub-sjjm_S_1_VIDEO','','bible_43_3_16_1','../x'])assert.equal(run('parseBibleKey('+JSON.stringify(bad)+')'),null,bad);
+  assert.equal(run("bibleLabel({book:43,chapter:3,verse:16})"),'Juan 3:16');assert.equal(run("LANG='en';bibleLabel({book:43,chapter:3,verse:0})"),'John 3');
+  assert.equal(run("timeToSec('00:03:17.664')"),197.664);assert.ok(Number.isNaN(run("timeToSec('x')")));
+});
+test('fetchBibleChapter: smallest file, verse markers from the entry that has them, 404 = none, network error = failed and not cached',async()=>{
+  const body={files:{ASL:{MP4:[
+    {track:3,file:{url:'https://cdn/x_ASL_03_r720P.mp4'},duration:582,markers:{markers:[{verseNumber:1,startTime:'00:00:02.035'},{verseNumber:16,startTime:'00:03:17.664'}]}},
+    {track:3,file:{url:'https://cdn/x_ASL_03_r240P.mp4'},duration:582,markers:null},
+    {track:3,file:{url:'https://cdn/x_ASL_03_r360P.mp4'},duration:582,markers:null}]}}};
+  let mode='ok',calls=[];
+  const c=bibleCtx({fetchJSON:async u=>{calls.push(u);if(mode==='ok')return body;if(mode==='404')throw new Error('HTTP 404');throw new Error('network')}});
+  const r=await vm.runInContext("fetchBibleChapter('ASL',43,3)",c);
+  assert.equal(r.state,'ok');assert.match(r.src,/r240P/);assert.equal(r.verses.get(16),197.664);assert.equal(r.verses.size,2);
+  assert.match(calls[0],/langwritten=ASL&booknum=43&track=3/);
+  await vm.runInContext("fetchBibleChapter('ASL',43,3)",c);assert.equal(calls.length,1,'cached');
+  mode='404';assert.equal((await vm.runInContext("fetchBibleChapter('JSL',43,3)",c)).state,'none');
+  mode='net';assert.equal((await vm.runInContext("fetchBibleChapter('ASL',44,3)",c)).state,'failed');
+  mode='ok';assert.equal((await vm.runInContext("fetchBibleChapter('ASL',44,3)",c)).state,'ok','a failure is not cached');
+  body.files.ASL.MP4=[{track:2,file:{url:'https://cdn/x_ASL_02_r240P.mp4'},duration:1,markers:null}];
+  assert.equal((await vm.runInContext("fetchBibleChapter('ASL',43,4)",c)).state,'none','another chapter is never used');
+});
+function fillWorld(chapter){
+  const log=[],side=[];
+  const opt=()=>({});
+  const sel={innerHTML:'',classList:{remove(){}},options:[],appendChild(o){this.options.push(o)},selectedIndex:-1,title:''};
+  const c=bibleCtx({SEL:{coll:'',key:''},tiles:new Map(),saveState(){side.push('save')},cancelRetry(e){side.push('cancelRetry')},sortTiles(){},
+    document:{createElement:()=>opt()},
+    setStatus:(e,k,a,err)=>{(k==='loading'?side:log).push(k==='loading'?'loading':['status',k,!!err])},
+    markUnavailable:(e,k)=>log.push(['unavailable',k]),
+    loadTileProgram:async(e,it)=>log.push(['load',it.naturalKey,it.startAt,it.verseNote,it.bibleSrc]),
+    __ch:chapter});
+  vm.runInContext('fetchBibleChapter = async () => __ch;',c);
+  vm.runInContext(grab(/async function fillBible\([\s\S]*?\n}\n/),c);
+  const entry={code:'LSE',coll:'BIBLE',prog:'',want:'',sel,tile:{classList:{add(){},remove(){}}},video:{src:'old.mp4',paused:false,pauses:0,pause(){this.paused=true;this.pauses++},removeAttribute(){this.src=''},load(){}},note:{textContent:'x'},startAt:123,shouldPlay:true,items:[]};
+  c.tiles.set('LSE',entry);
+  return {c,entry,log,side};
+}
+test('Bible tile: loads exactly the requested chapter at its verse; no verse = chapter start; missing marker = start + note',async()=>{
+  const ok={state:'ok',src:'https://cdn/a_r240P.mp4',verses:new Map([[16,197.6]])};
+  let w=fillWorld(ok);await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_16');
+  assert.deepEqual(w.log,[['load','bible_43_3_16',197.6,false,'https://cdn/a_r240P.mp4']]);
+  w=fillWorld(ok);await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3');assert.deepEqual(w.log,[['load','bible_43_3',0,false,'https://cdn/a_r240P.mp4']]);
+  w=fillWorld(ok);await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_99');assert.deepEqual(w.log,[['load','bible_43_3_99',0,true,'https://cdn/a_r240P.mp4']]);
+});
+test('Bible tile: language without the chapter is a black unavailable cell, never another passage; a failed request is retriable',async()=>{
+  let w=fillWorld({state:'none'});await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_16');
+  assert.deepEqual(w.log,[['unavailable','bible_43_3_16']]);
+  w=fillWorld({state:'failed'});await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_16');
+  assert.deepEqual(w.log,[['status','loadErr',true]]);assert.equal(w.entry.want,'bible_43_3_16');assert.equal(w.entry.prog,'bible_43_3_16');
+  w=fillWorld({state:'ok',src:'https://cdn/a.mp4',verses:new Map()});await vm.runInContext('fillBible',w.c)(w.entry,'garbage');
+  assert.equal(w.log[0][1],'bible_43_3','an invalid key falls back to the default passage, never to a video of another kind');
+});
+test('Bible tile: removed tile or replaced request is ignored',async()=>{
+  const w=fillWorld({state:'ok',src:'https://cdn/a.mp4',verses:new Map()});
+  const p=vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3');w.c.tiles.clear();await p;assert.deepEqual(w.log,[]);
+  const w2=fillWorld({state:'ok',src:'https://cdn/a.mp4',verses:new Map()});
+  const p2=vm.runInContext('fillBible',w2.c)(w2.entry,'bible_43_3');w2.entry.coll='VODMusicVideos';await p2;assert.deepEqual(w2.log,[],'the tile moved to another section meanwhile');
+});
+test('Play all on a Bible passage starts each tile at its own verse; other videos keep the common timestamp',async()=>{
+  const a=new FV({_t:0}),b=new FV({_t:0}),o=new FV({_t:50});
+  const w=syncWorld([a,b,o]);w.c.tiles.get('L0').startAt=179.9;w.c.tiles.get('L1').startAt=197.6;
+  await w.run('startTogether()');
+  assert.equal(a.played,1);assert.equal(b.played,1);assert.equal(o.played,1);
+  assert.ok(Math.abs(a._t-179.9)<0.01);assert.ok(Math.abs(b._t-197.6)<0.01);assert.ok(Math.abs(o._t-50)<0.01);
+});
+test('Bible wiring: collection, global selects, apply, share link, per-tile seek',()=>{
+  assert.match(script,/\['BIBLE', t\('bibleColl'\)\]/);
+  assert.match(script,/if \(entry\.coll === 'BIBLE'\) return fillBible\(entry, keepProg, listOnly\)/);
+  assert.match(script,/if \(isBible\) \{ x\.coll = coll; x\.prog = ''; x\.want = ''; x\.shouldPlay = false; await fillBible\(x, nk\); return; \}/);
+  assert.match(script,/loadedmetadata', \(\) => \{ if \(entry\.startAt > 0/);
+  assert.match(script,/const targetOf = s =>/);
+  const c=vm.createContext({URLSearchParams,Number,Math,String,Array});
+  vm.runInContext([grab(/function validLanguageCode\([\s\S]*?\n}/),grab(/function buildShareHash\([\s\S]*?\n}/),grab(/function parseShareHash\([\s\S]*?\n}/)].join('\n'),c);
+  const h=vm.runInContext("buildShareHash(['LSE','ASL'],'BIBLE','bible_43_3_16')",c);
+  const r=vm.runInContext("parseShareHash("+JSON.stringify('#'+h)+",['BIBLE','VODBible'])",c);
+  assert.deepEqual(JSON.parse(JSON.stringify(r)),{langs:[{code:'LSE',coll:'BIBLE',prog:'bible_43_3_16'},{code:'ASL',coll:'BIBLE',prog:'bible_43_3_16'}]});
+});
+test('Bible tile: a slow answer for an older passage never overrides the newer request',async()=>{
+  const w=fillWorld({state:'none'});
+  let rel1;const slow=new Promise(r=>rel1=r);
+  vm.runInContext('fetchBibleChapter = async (code, b, ch) => ch === 3 ? __slow : __fast;',w.c);
+  w.c.__slow=slow;w.c.__fast={state:'ok',src:'https://cdn/new.mp4',verses:new Map()};
+  const first=vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3');
+  await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_4');
+  rel1({state:'ok',src:'https://cdn/old.mp4',verses:new Map()});await first;
+  assert.deepEqual(w.log,[['load','bible_43_4',0,false,'https://cdn/new.mp4']]);
+});
+
+test('"For all" follows the restored mosaic selection until the user picks a section by hand',()=>{
+  const c=vm.createContext({});vm.runInContext(grab(/function pickGlobalColl\([\s\S]*?\n}\n/),c);
+  const keys=['StudioMonthlyPrograms','VODMusicVideos','BIBLE'];const p=(...a)=>vm.runInContext('pickGlobalColl',c)(...a);
+  assert.equal(p(keys,{coll:'BIBLE',key:'bible_19_23_4'},'BIBLE','StudioMonthlyPrograms',false),'BIBLE','restored passage: the picker shows the Bible, not the first option');
+  assert.equal(p(keys,{coll:'VODMusicVideos',key:'k'},'VODMusicVideos','StudioMonthlyPrograms',false),'VODMusicVideos');
+  assert.equal(p(keys,{coll:'BIBLE',key:'bible_19_23_4'},'BIBLE','VODMusicVideos',true),'VODMusicVideos','the user picked a section: it is kept');
+  assert.equal(p(keys,{coll:'',key:''},'VODMusicVideos','',false),'VODMusicVideos','no selection: first tile section');
+  assert.equal(p(keys,{coll:'GONE',key:'x'},'','',false),'','unknown section is ignored');
+  assert.match(script,/addEventListener\('change', \(\) => \{ globTouched = true;/);
+  assert.match(script,/pickGlobalColl\(\[\.\.\.gc\.options\]/);
+});
+
+test('Bible tile: asking for a new passage stops the old one at once, before the API answers, and keeps the request',async()=>{
+  const w=fillWorld({state:'none'});
+  let rel;const hang=new Promise(r=>rel=r);w.c.__hang=hang;
+  vm.runInContext('fetchBibleChapter = async () => __hang;',w.c);
+  const e=w.entry;e.prog='bible_43_1';e.items=[{naturalKey:'bible_43_1'}];
+  const pending=vm.runInContext('fillBible',w.c)(e,'bible_43_3_16');
+  // the API has not answered yet
+  assert.equal(e.video.paused,true);assert.ok(e.video.pauses>=1,'the old video was paused immediately');
+  assert.equal(e.video.src,'','the old source was removed');assert.equal(e.startAt,undefined);assert.equal(e.shouldPlay,false);
+  assert.equal(e.prog,'','nothing is signed as the old passage');assert.equal(e.want,'bible_43_3_16','the attempt is kept for Retry and saveState');
+  assert.equal(e.items.length,0);assert.equal(e.note.textContent,'');
+  assert.ok(w.side.includes('cancelRetry')&&w.side.includes('loading')&&w.side.includes('save'),'retry cancelled, loading shown, state saved');
+  assert.equal(e.sel.options[0].value,'bible_43_3_16','the selector already shows the requested passage');
+  rel({state:'ok',src:'https://cdn/n.mp4',verses:new Map([[16,50]])});await pending;
+  assert.deepEqual(w.log,[['load','bible_43_3_16',50,false,'https://cdn/n.mp4']]);
+});
+test('Bible request that hangs becomes a retriable failure after the timeout',async()=>{
+  const c=bibleCtx({fetchJSON:()=>new Promise(()=>{})});vm.runInContext('BIBLE_TIMEOUT = 30;',c);
+  assert.equal((await vm.runInContext("fetchBibleChapter('LSE',43,3)",c)).state,'failed');
+  vm.runInContext("fetchJSON = async () => ({files:{LSE:{MP4:[{track:3,file:{url:'https://cdn/a_r240P.mp4'},duration:1,markers:null}]}}})",c);
+  assert.equal((await vm.runInContext("fetchBibleChapter('LSE',43,3)",c)).state,'ok','the timed-out failure is not cached');
+  assert.match(script,/entry\.prog = ''; entry\.want = key;/);
 });
