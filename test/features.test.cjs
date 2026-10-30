@@ -1,0 +1,530 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('fs'),vm=require('vm');
+const html=fs.readFileSync(__dirname+'/../index.html','utf8'),script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const grab=(re)=>script.match(re)[0];
+const ctx=vm.createContext({URLSearchParams,Number,Math,String,Array});
+vm.runInContext([
+  grab(/function syncTarget\([\s\S]*?\n}/),
+  grab(/function positionFor\([\s\S]*?\n}/),
+  grab(/function skipTarget\([\s\S]*?\n}/),
+  grab(/function clampVolume\([^\n]*\n/),
+  grab(/function validLanguageCode\([\s\S]*?\n}/),
+  grab(/function buildShareHash\([\s\S]*?\n}/),
+  grab(/function parseShareHash\([\s\S]*?\n}/),
+].join('\n'),ctx);
+const COLLS=['StudioMonthlyPrograms','VODStudio','VODMusicVideos'];
+
+// --- synchronized start ---
+test('syncTarget: furthest timestamp, inside the shortest video',()=>{
+  assert.equal(ctx.syncTarget([0,0,0],[100,100,100]),0);
+  assert.equal(ctx.syncTarget([5,12,7],[100,100,100]),12);
+  assert.equal(ctx.syncTarget([50,60],[100,55]),54);
+  assert.equal(ctx.syncTarget([NaN],[100]),0);
+  assert.equal(ctx.syncTarget([],[]),0);
+});
+
+// --- volume ---
+test('clampVolume bounds and defaults',()=>{
+  assert.equal(ctx.clampVolume(0.4),0.4);assert.equal(ctx.clampVolume(7),1);assert.equal(ctx.clampVolume(-1),0);
+  assert.equal(ctx.clampVolume('abc'),1);assert.equal(ctx.clampVolume(undefined),1);
+});
+test('one volume slider, one audible tile, native controls respected (static)',()=>{
+  assert.ok(html.includes('id="vol"'));
+  const m=grab(/function muteOthers\(except\) \{[\s\S]*?\n}/);
+  assert.match(m,/x\.video\.muted = !on/);assert.match(m,/x\.video\.volume = masterVol/);
+  const n=grab(/function onNativeVolume\(entry\) \{[\s\S]*?\n}/);
+  assert.match(n,/setMasterVolume\(v\.volume\)/,'native volume drives the single slider');
+  assert.match(script,/muteOthers\(audible === entry \? null : entry\)/,'speaker toggles');
+  assert.match(script,/addEventListener\('volumechange'/);
+});
+
+// --- share link ---
+test('share hash round trip',()=>{
+  const h=ctx.buildShareHash(['LSE','ASL'],'VODStudio','pub-jwb-142_LSE_1_VIDEO');
+  assert.equal(h,'l=LSE,ASL&c=VODStudio&p=pub-jwb-142_LSE_1_VIDEO');
+  const r=ctx.parseShareHash('#'+h,COLLS);
+  assert.deepEqual(JSON.parse(JSON.stringify(r)),{langs:[{code:'LSE',coll:'VODStudio',prog:'pub-jwb-142_LSE_1_VIDEO'},{code:'ASL',coll:'VODStudio',prog:'pub-jwb-142_LSE_1_VIDEO'}]});
+});
+test('share hash validates everything and ignores junk',()=>{
+  const P=(h)=>JSON.parse(JSON.stringify(ctx.parseShareHash(h,COLLS)));
+  assert.equal(P(''),null);assert.equal(P('#x=1'),null);assert.equal(P('#l=../x,<script>,lower'),null);
+  assert.deepEqual(P('#l=LSE,LSE,ASL'),{langs:[{code:'LSE'},{code:'ASL'}]},'deduplicated');
+  assert.deepEqual(P('#l=LSE&c=Evil&p=a b'),{langs:[{code:'LSE'}]},'unknown collection and bad publication dropped');
+  assert.deepEqual(P('#l=LSE&c=VODStudio&p=%3Cb%3E'),{langs:[{code:'LSE',coll:'VODStudio'}]});
+  const many=Array.from({length:500},(_,i)=>'S'+i).join(',');assert.equal(P('#l='+many).langs.length,300);
+});
+test('share link is consumed once on load and wired to a button',()=>{
+  assert.ok(html.includes('id="shareBtn"'));
+  assert.match(script,/const state = shared \|\| loadState\(\)/);
+  assert.match(script,/history\.replaceState\(null, '', location\.pathname \+ location\.search\)/);
+});
+
+// --- jump to the same position ---
+test('positionFor keeps the same relative position inside each video',()=>{
+  assert.equal(ctx.positionFor(0.5,101),50);assert.equal(ctx.positionFor(1,101),100);assert.equal(ctx.positionFor(-3,101),0);
+  assert.equal(ctx.positionFor(0.5,NaN),null);assert.equal(ctx.positionFor(0.5,0),null);
+});
+test('skipTarget moves all tiles to one timestamp, bounded',()=>{
+  assert.equal(ctx.skipTarget([10,12],[100,100],10),22);
+  assert.equal(ctx.skipTarget([10,12],[100,100],-30),0);
+  assert.equal(ctx.skipTarget([95],[100,98],10),97);
+});
+
+// --- retry failed ---
+
+// --- i18n for the new UI ---
+const dictKeys=(lang)=>{const m=script.match(new RegExp('  '+lang+': \\{([\\s\\S]*?)\\n  \\}'));return [...m[1].matchAll(/(?:^|,)\s*(\w+):\s/gm)].map(x=>x[1]).sort();};
+test('new keys exist in both languages',()=>{
+  for(const k of ['syncing','syncSkipped','volLbl','shareBtn','shareCopied','sharePrompt','jumpLbl','back10','fwd10','posLbl','retryFailed']){
+    assert.ok(dictKeys('es').includes(k)&&dictKeys('en').includes(k),k);}
+  assert.deepEqual(dictKeys('es'),dictKeys('en'));
+});
+test('JS parses',()=>new vm.Script(script));
+
+// ================= behavioural tests (fake videos, real functions from index.html) =================
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+class FV extends EventTarget{
+  constructor(o={}){super();this._t=0;this.seekMode='ok';Object.assign(this,{src:'u',error:null,readyState:4,duration:100,paused:true,muted:true,volume:1,played:0},o);}
+  get currentTime(){return this._t}
+  set currentTime(x){
+    if(this.seekMode==='never')return;
+    setTimeout(()=>{this._t=this.seekMode==='wrong'?x+5:x;this.dispatchEvent(new Event('seeked'))},2);
+  }
+  pause(){this.paused=true} play(){this.paused=false;this.played++;return Promise.resolve()}
+  ready(){this.readyState=4;this.dispatchEvent(new Event('loadeddata'))}
+}
+const mkEntry=(video)=>({video,tile:{classList:{contains:()=>false}},audioBtn:{textContent:''}});
+function syncWorld(videos){
+  const notice={textContent:''};
+  const c=vm.createContext({setTimeout,clearTimeout,Promise,Math,Number,Array,Map,Object,
+    document:{getElementById:()=>notice},t:(k)=>k==='syncSkipped'?(n=>'skipped '+n):k,tiles:new Map()});
+  vm.runInContext([
+    grab(/function activeVideos\([^\n]*/),
+    grab(/function syncTarget\([\s\S]*?\n}/),
+    grab(/function waitReady\([\s\S]*?\n}/),
+    grab(/function seekTo\([\s\S]*?\n}/),
+    grab(/function flashNotice\([\s\S]*?\n}/),
+    grab(/const SYNC_TIMEOUTS[^\n]*/),
+    grab(/let syncGen = 0[^\n]*/),
+    grab(/function cancelSync\([^\n]*/),
+    grab(/function snapshotOf\([^\n]*/),
+    grab(/function stillValid\(s\) \{[\s\S]*?\n}/),
+    grab(/function entryOf\([^\n]*/),
+    grab(/function markSkipped\([^\n]*/),
+    grab(/async function startTogether\(\) \{[\s\S]*?\n}/),
+    grab(/function autoResume\(\) \{[\s\S]*?\n}/),
+    'SYNC_TIMEOUTS.ready=80;SYNC_TIMEOUTS.seek=80;SYNC_TIMEOUTS.settle=80;',
+  ].join('\n'),c);
+  videos.forEach((v,i)=>c.tiles.set('L'+i,mkEntry(v)));
+  return {c,notice,run:(code)=>vm.runInContext(code,c)};
+}
+test('sync success: every ready tile seeks to the common time and plays',async()=>{
+  const vs=[new FV({_t:5}),new FV({_t:12}),new FV({_t:7})];
+  const w=syncWorld(vs);await w.run('startTogether()');
+  assert.deepEqual(vs.map(v=>v.currentTime),[12,12,12]);assert.deepEqual(vs.map(v=>v.played),[1,1,1]);assert.equal(w.notice.textContent,'');
+});
+test('Pause all during the wait cancels: nothing seeks or plays afterwards',async()=>{
+  const slow=new FV({readyState:0});const ok=new FV();
+  const w=syncWorld([slow,ok]);const p=w.run('startTogether()');
+  await sleep(10);w.run('cancelSync()');slow.ready();await p;await sleep(20);
+  assert.equal(slow.played+ok.played,0);assert.equal(slow.currentTime,0);assert.equal(w.run('syncing'),false);
+});
+test('a newer sync supersedes the older one; only the newest plays',async()=>{
+  const slow=new FV({readyState:0});const w=syncWorld([slow]);
+  const p1=w.run('startTogether()');await sleep(10);const p2=w.run('startTogether()');slow.ready();await Promise.all([p1,p2]);await sleep(20);
+  assert.equal(slow.played,1);
+});
+test('removing a tile during the wait: its video is not touched, the rest play',async()=>{
+  const gone=new FV({readyState:0});const keep=new FV();
+  const w=syncWorld([gone,keep]);const p=w.run('startTogether()');
+  await sleep(10);w.c.tiles.delete('L0');gone.ready();await p;
+  assert.equal(gone.played,0);assert.equal(gone.currentTime,0);assert.equal(keep.played,1);
+});
+test('changing a tile source during the wait excludes it',async()=>{
+  const sw=new FV({readyState:0});const keep=new FV();
+  const w=syncWorld([sw,keep]);const p=w.run('startTogether()');
+  await sleep(10);sw.src='other';sw.ready();await p;
+  assert.equal(sw.played,0);assert.equal(keep.played,1);assert.match(w.notice.textContent,/skipped 1/);
+});
+test('a tile marked with an error during the wait is skipped',async()=>{
+  const bad=new FV({readyState:0});const keep=new FV();
+  const w=syncWorld([bad,keep]);const p=w.run('startTogether()');
+  await sleep(10);bad.error={code:4};bad.ready();await p;assert.equal(bad.played,0);assert.equal(keep.played,1);
+});
+test('not ready within the limit: skipped and reported, others still start',async()=>{
+  const never=new FV({readyState:0});const keep=new FV();
+  const w=syncWorld([never,keep]);await w.run('startTogether()');
+  assert.equal(never.played,0);assert.equal(keep.played,1);assert.match(w.notice.textContent,/skipped 1/);
+});
+test('seek that never confirms (timeout) is not a sync: skipped, not played',async()=>{
+  const stuck=new FV({seekMode:'never',_t:3});const keep=new FV({_t:9});
+  const w=syncWorld([stuck,keep]);await w.run('startTogether()');
+  assert.equal(stuck.played,0);assert.equal(keep.played,1);assert.match(w.notice.textContent,/skipped 1/);
+});
+test('seek confirmed but readback is wrong: skipped, not played',async()=>{
+  const off=new FV({seekMode:'wrong'});const keep=new FV({_t:4});
+  const w=syncWorld([off,keep]);await w.run('startTogether()');
+  assert.equal(off.played,0);assert.equal(keep.played,1);assert.match(w.notice.textContent,/skipped 1/);
+});
+test('readiness lost after the seek: skipped, not played',async()=>{
+  const v=new FV({_t:3});const keep=new FV({_t:9});
+  const w=syncWorld([v,keep]);
+  v.addEventListener('seeked',()=>{v.readyState=1});
+  await w.run('startTogether()');assert.equal(v.played,0);assert.equal(keep.played,1);
+});
+test('auto-resume: restarts browser-paused tiles but never undoes Pause all or a sync in progress',async()=>{
+  const v=new FV();const w=syncWorld([v]);
+  w.run('autoResume()');assert.equal(v.played,0,'a tile that never started is not started by the safety net');
+  w.c.tiles.get('L0').shouldPlay=true;w.run('autoResume()');assert.equal(v.played,1,'resumes a tile the browser paused after it was playing');
+  v.pause();w.run('userPaused=true;autoResume()');assert.equal(v.played,1,'Pause all is respected');
+  w.run('userPaused=false;syncing=true;autoResume()');assert.equal(v.played,1,'no interference with a sync');
+  assert.match(script,/getElementById\('pauseAll'\)\.addEventListener\('click', \(\) => \{ cancelSync\(\); userPaused = true;/);
+  assert.match(script,/getElementById\('playAll'\)\.addEventListener\('click', startTogether\)/);
+  assert.match(grab(/async function startTogether\(\) \{[\s\S]*?\n}/),/userPaused = false/);
+});
+test('remove all cancels a pending sync',()=>{assert.match(script.match(/function removeAllTiles\(\) \{[\s\S]*?\n}\n/)[0],/cancelSync\(\)/);assert.match(script.match(/getElementById\('rmAll'\)\.addEventListener\('click'[\s\S]*?\n\}\);/)[0],/removeAllTiles\(\)/)});
+
+// --- native volume with real volumechange events ---
+function volWorld(){
+  const slider={value:1};
+  const c=vm.createContext({Math,Number,String,document:{getElementById:()=>slider},localStorage:{getItem:()=>null,setItem(){}},tiles:new Map()});
+  vm.runInContext(['const VOL_KEY = \'k\';',grab(/function clampVolume\([^\n]*\n/),'let masterVol = 0.3; let audible = null;',
+    grab(/function muteOthers\(except\) \{[\s\S]*?\n}/),grab(/function setMasterVolume\(v\) \{[\s\S]*?\n}/),grab(/function onNativeVolume\(entry\) \{[\s\S]*?\n}/)].join('\n'),c);
+  return {c,run:code=>vm.runInContext(code,c),slider};
+}
+test('new tile arriving unmuted at volume .8 with master .3 keeps .8 and silences the others',()=>{
+  const w=volWorld();
+  const a=new FV({muted:true,volume:0.3}),b=new FV({muted:true,volume:0.3}),n=new FV({muted:false,volume:0.8});
+  const ents=[a,b,n].map(v=>Object.assign(mkEntry(v),{}));ents.forEach((e,i)=>w.c.tiles.set('L'+i,e));
+  const entry=ents[2];
+  entry.video.addEventListener('volumechange',()=>w.c.onNativeVolume(entry)); // the real wiring in addTile
+  entry.video.dispatchEvent(new Event('volumechange'));
+  assert.equal(n.volume,0.8,'native volume not overwritten');assert.equal(w.run('masterVol'),0.8);assert.equal(w.slider.value,0.8);
+  assert.equal(a.muted,true);assert.equal(b.muted,true);assert.equal(n.muted,false);assert.equal(a.volume,0.8);
+});
+test('native mute of the audible tile silences all; native volume change moves the slider',()=>{
+  const w=volWorld();const a=new FV({muted:false,volume:0.3}),b=new FV({muted:true});
+  const ents=[a,b].map(mkEntry);ents.forEach((e,i)=>w.c.tiles.set('L'+i,e));w.run('audible=tiles.get("L0")');
+  a.volume=0.6;w.c.onNativeVolume(ents[0]);assert.equal(w.run('masterVol'),0.6);assert.equal(b.volume,0.6);
+  a.muted=true;w.c.onNativeVolume(ents[0]);assert.equal(w.run('audible'),null);
+});
+
+// --- listing errors: partial results are kept, flagged and retried; empty is not a failure ---
+function listWorld(handler){
+  const c=vm.createContext({API:'A',fetchJSON:async(u)=>handler(u),Array,Promise});
+  vm.runInContext(grab(/async function fetchCollection\([\s\S]*?\n}\n/),c);return c;
+}
+const vid=(k)=>({type:'video',naturalKey:k,title:k,languageAgnosticNaturalKey:k});
+test('fetchCollection: top-level failure is failed, genuinely empty is not',async()=>{
+  let r=await listWorld(()=>{throw new Error('HTTP 500')}).fetchCollection('LSE','X');assert.equal(r.failed,true);assert.equal(r.length,0);
+  r=await listWorld(()=>({category:{}})).fetchCollection('LSE','X');assert.ok(!r.failed&&!r.partial);assert.equal(r.length,0);
+});
+test('fetchCollection: a failing subcategory keeps the rest and is flagged partial (not failed, not silent)',async()=>{
+  const c=listWorld((u)=>{
+    if(u.includes('/SubBad'))throw new Error('HTTP 503');
+    if(u.includes('/SubOk'))return {category:{media:[vid('b')]}};
+    return {category:{media:[vid('a')],subcategories:[{key:'SubOk',name:'ok'},{key:'SubBad',name:'bad'}]}};
+  });
+  const r=await c.fetchCollection('LSE','X');
+  assert.deepEqual(Array.from(r,x=>x.naturalKey),['a','b']);assert.equal(r.partial,true);assert.ok(!r.failed);
+});
+test('partial tiles count as failed, are retried list-only, and a failed refresh keeps the old list',()=>{
+  assert.match(grab(/function isFailed\(x\)[^\n]*/),/x\.partial \|\| statusFailed\(x\)/);
+  const r=grab(/async function retryEntry\(x\) \{[\s\S]*?\n}/);
+  assert.match(r,/if \(x\.partial && \(!failedVideo || x\.video\.src\)\) await fillPrograms\(x, x\.prog, false, false, true\)/);
+  assert.ok(r.indexOf('fillPrograms(x, x.prog, false, false, true)')<r.indexOf('x.video.load()'));
+  const f=grab(/async function fillPrograms\([\s\S]*?\n}\n/);
+  assert.match(f,/if \(items\.failed && listOnly\) return;/);
+  assert.ok(f.indexOf('fetchCollection')<f.indexOf("sel.innerHTML = ''"),'list is fetched before the old one is cleared');
+  assert.match(f,/if \(listOnly\) \{ sel\.selectedIndex/,'list-only refresh never reloads the video');
+  assert.match(f,/if \(items\.failed\) \{ setStatus\(entry, 'loadErr'/);
+});
+test('new keys incl. partialTip exist in both languages',()=>{for(const k of ['partialTip'])assert.ok(dictKeys('es').includes(k)&&dictKeys('en').includes(k),k)});
+test('workflow checkout does not persist credentials',()=>{
+  const w=fs.readFileSync(__dirname+'/../.github/workflows/test.yml','utf8');
+  assert.match(w,/actions\/checkout@[0-9a-f]{40}\n\s+with:\n\s+persist-credentials: false/);
+});
+
+// ================= round 3: skipped tiles stay paused; strict publication + partial list =================
+test('sync failure then auto-resume: skipped tiles stay paused, others untouched',async()=>{
+  const stuck=new FV({seekMode:'never',_t:3});const keep=new FV({_t:9});
+  const w=syncWorld([stuck,keep]);await w.run('startTogether()');
+  assert.equal(w.run('syncing'),false);
+  keep.pause();w.run('autoResume()');
+  assert.equal(stuck.played,0,'skipped tile is not resumed out of sync');assert.equal(keep.played,2,'a normal tile still is');
+});
+test('rejected play() counts as a failed sync and keeps the tile paused',async()=>{
+  const bad=new FV();bad.play=()=>Promise.reject(new Error('NotAllowed'));const keep=new FV();
+  const w=syncWorld([bad,keep]);await w.run('startTogether()');
+  assert.match(w.notice.textContent,/skipped 1/);bad.play=function(){this.paused=false;this.played++;return Promise.resolve()};
+  w.run('autoResume()');assert.equal(bad.played,0);
+});
+test('a new Sync re-evaluates skipped tiles; a new source clears the skip',async()=>{
+  const v=new FV({seekMode:'never',_t:3});const keep=new FV({_t:9});
+  const w=syncWorld([v,keep]);await w.run('startTogether()');assert.equal(v.played,0);
+  v.seekMode='ok';await w.run('startTogether()');assert.equal(v.played,1);assert.equal(v.currentTime,9);
+  const u=new FV({seekMode:'never',_t:1});const k2=new FV({_t:6});const w2=syncWorld([u,k2]);await w2.run('startTogether()');
+  w2.c.tiles.get('L0').shouldPlay=true;u.src='new';w2.run('autoResume()');assert.equal(u.played,1,'intent kept, different source clears the skip mark');
+});
+test('sync that skips every tile marks them all',async()=>{
+  const a=new FV({readyState:0}),b=new FV({readyState:0});const w=syncWorld([a,b]);await w.run('startTogether()');
+  w.run('autoResume()');assert.equal(a.played+b.played,0);
+});
+test('Retry clears the skip mark',()=>assert.match(grab(/async function retryEntry\(x\) \{[\s\S]*?\n}/),/x\.syncSkipSrc = ''/));
+
+// --- integration: shared link -> subcategory holding the publication fails -> Retry succeeds -> same publication ---
+function tileWorld(handler){
+  const el=()=>({children:[],style:{},dataset:{},selectedIndex:0,textContent:'',title:'',value:'',
+    classList:{_s:new Set(),add(x){this._s.add(x)},remove(x){this._s.delete(x)},contains(x){return this._s.has(x)},toggle(x,f){f?this._s.add(x):this._s.delete(x)}},
+    appendChild(c){this.children.push(c)},set innerHTML(v){this.children=[]},get innerHTML(){return ''}});
+  const retryBtn=el();
+  const c=vm.createContext({clearTimeout,setTimeout,Array,Promise,Map,Math,String,Number,Object,API:'A',LANG:'en',tiles:new Map(),fetchJSON:async u=>handler(u),
+    document:{createElement:()=>el(),getElementById:()=>retryBtn},
+    t:(k)=>k==='retryFailed'?(n=>'retry '+n):k,saveState(){},refreshGlobalPicker(){},sortTiles(){}});
+  vm.runInContext([grab(/function normKey\([^\n]*/),grab(/const UI_SOURCES[^\n]*/),'const titleCache = new Map();',grab(/function titleKey\([^\n]*/),grab(/function uiTitles\([\s\S]*?\n}\n/),grab(/function localTitle\([^\n]*/),grab(/function localGroup\([^\n]*/),grab(/function pickFile\([\s\S]*?\n}/),grab(/async function fetchCollection\([\s\S]*?\n}\n/),
+    grab(/function setStatus\([\s\S]*?\n}/),grab(/function statusFailed\([^\n]*/),grab(/function isFailed\([^\n]*/),grab(/function updateRetryUI\([\s\S]*?\n}/),
+    grab(/function markUnavailable\([\s\S]*?\n}/),grab(/function holdIndeterminate\([\s\S]*?\n}/),grab(/function cancelRetry\([^\n]*\n/),grab(/async function loadTileProgram\([\s\S]*?\n}/),
+    grab(/async function fillPrograms\([\s\S]*?\n}\n/),grab(/async function retryEntry\([\s\S]*?\n}/)].join('\n'),c);
+  const video=new FV({src:''});video.removeAttribute=function(){this.src=''};video.load=function(){};
+  const entry={code:'LSE',coll:'VODStudio',prog:'pub-x_LSE_1_VIDEO',video,tile:el(),sel:el(),status:el(),items:[],armWatchdog(){},resetRetry(){}};
+  c.tiles.set('LSE',entry);
+  return {c,entry,video};
+}
+const media=(k)=>({type:'video',naturalKey:k,languageAgnosticNaturalKey:k.replace('_LSE','') ,title:k,files:[{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/'+k+'_r240P.mp4'}]});
+test('shared publication in a failed subcategory: held as incomplete, Retry resolves to the SAME publication',async()=>{
+  let subOk=false;
+  const w=tileWorld((u)=>{
+    if(u.includes('/SubPub')){ if(!subOk)throw new Error('HTTP 503'); return {category:{media:[media('pub-x_LSE_1_VIDEO')]}}; }
+    return {category:{media:[media('other_LSE_1_VIDEO')],subcategories:[{key:'SubPub',name:'g'}]}};
+  });
+  const e=w.entry;
+  await w.c.fillPrograms(e,'pub-x_LSE_1_VIDEO',true);
+  assert.equal(e.statusKey,'listIncomplete');assert.equal(e.status.classList.contains('err'),true,'visible error, retriable');
+  assert.equal(e.prog,'pub-x_LSE_1_VIDEO','requested publication kept, not cleared');assert.equal(e.partial,true);assert.notEqual(e.statusKey,'noEquiv');
+  assert.equal(w.c.isFailed(e),true);
+  subOk=true;await w.c.retryEntry(e);
+  assert.equal(e.partial,false);assert.equal(e.prog,'pub-x_LSE_1_VIDEO');assert.equal(e.video.src,'https://cdn/pub-x_LSE_1_VIDEO_r240P.mp4');
+  assert.equal(e.tile.classList.contains('novideo'),false,'novideo cleared');assert.equal(w.c.isFailed(e),false);
+});
+test('complete list without the publication is a definitive "not available"',async()=>{
+  const w=tileWorld(()=>({category:{media:[media('other_LSE_1_VIDEO')]}}));
+  await w.c.fillPrograms(w.entry,'pub-x_LSE_1_VIDEO',true);
+  assert.equal(w.entry.statusKey,'noEquiv');assert.equal(w.entry.prog,'');
+});
+test('still-incomplete after Retry stays indeterminate and retriable',async()=>{
+  const w=tileWorld((u)=>{if(u.includes('/SubPub'))throw new Error('x');return {category:{media:[],subcategories:[{key:'SubPub'}]}}});
+  await w.c.fillPrograms(w.entry,'pub-x_LSE_1_VIDEO',true);await w.c.retryEntry(w.entry);
+  assert.equal(w.entry.statusKey,'listIncomplete');assert.equal(w.entry.prog,'pub-x_LSE_1_VIDEO');assert.equal(w.c.isFailed(w.entry),true);
+});
+test('global apply and tap-to-retry use the same indeterminate handling; new key in both languages',()=>{
+  assert.match(script,/else if \(x\.partial\) holdIndeterminate\(x, nk\)/);
+  assert.match(script,/if \(status\.classList\.contains\('err'\)\) retryEntry\(entry\)/);
+  assert.ok(dictKeys('es').includes('listIncomplete')&&dictKeys('en').includes('listIncomplete'));
+});
+
+// ================= never show another video: black cell + "not available" =================
+function worldWithSel(handler,sel){
+  const w=tileWorld(handler);
+  vm.runInContext('let SEL = '+JSON.stringify(sel||{coll:'',key:''})+';',w.c);
+  return w;
+}
+const songs=(...ks)=>({category:{media:ks.map(media)}});
+test('a requested publication missing from a complete list: black cell, no first-video fallback, even when not strict',async()=>{
+  for(const strict of [true,false]){
+    const w=tileWorld(()=>songs('rise-again_LSE_1_VIDEO','other_LSE_2_VIDEO'));
+    await w.c.fillPrograms(w.entry,'pub-x_LSE_1_VIDEO',strict);
+    assert.equal(w.video.src,'','nothing loaded');assert.equal(w.entry.tile.classList.contains('novideo'),true);
+    assert.equal(w.entry.statusKey,'noEquiv');assert.equal(w.entry.want,'pub-x_LSE_1_VIDEO','request remembered');
+  }
+});
+test('the remembered request is saved, so a reload cannot turn "not available" into the first video',async()=>{
+  const saved=[];
+  const w=tileWorld(()=>songs('rise-again_LSE_1_VIDEO'));w.c.saveState=()=>saved.push({prog:w.entry.prog,want:w.entry.want});
+  await w.c.fillPrograms(w.entry,'pub-x_LSE_1_VIDEO',true);
+  assert.deepEqual(saved.at(-1),{prog:'',want:'pub-x_LSE_1_VIDEO'});
+  assert.match(grab(/function saveState\([\s\S]*?\n}/),/want: x\.want \|\| ''/);
+  // restoring {coll, prog:'', want}: strict on want
+  const w2=tileWorld(()=>songs('rise-again_LSE_1_VIDEO'));
+  await w2.c.fillPrograms(w2.entry,w2.entry.prog||'pub-x_LSE_1_VIDEO',true);
+  assert.equal(w2.video.src,'');
+  assert.match(script,/const wantKey = entry\.prog \|\| entry\.want \|\| inheritProg/);
+});
+test('when it exists in the list the tile loads exactly it and clears the request',async()=>{
+  const w=tileWorld(()=>songs('rise-again_LSE_1_VIDEO','pub-x_LSE_1_VIDEO'));w.entry.want='pub-x_LSE_1_VIDEO';
+  await w.c.fillPrograms(w.entry,'pub-x_LSE_1_VIDEO',true);
+  assert.equal(w.video.src,'https://cdn/pub-x_LSE_1_VIDEO_r240P.mp4');assert.equal(w.entry.want,'');assert.equal(w.entry.tile.classList.contains('novideo'),false);
+});
+test('Retry of an unavailable tile uses the remembered request',()=>assert.match(grab(/async function retryEntry\([\s\S]*?\n}/),/fillPrograms\(x, x\.prog \|\| x\.want, !!\(x\.prog \|\| x\.want\)\)/));
+test('new tiles take the mosaic selection strictly; selection set by tile choice and by Apply to all, persisted',()=>{
+  const a=grab(/async function addTile\([\s\S]*?\n}\n/);
+  assert.match(a,/if \(SEL\.key\) \{[\s\S]*?inheritProg = SEL\.key;/);
+  assert.match(script,/if \(it\) SEL = \{ coll: entry\.coll, key: normKey\(it\) \}/);
+  assert.match(script,/if \(nk\) SEL = \{ coll, key: nk \}/);
+  assert.match(grab(/function saveState\([\s\S]*?\n}/),/JSON\.stringify\(\{ langs, sel: SEL \}\)/);
+});
+test('sanitizeSel rejects junk',()=>{
+  const c=vm.createContext({});vm.runInContext(grab(/function sanitizeSel\([\s\S]*?\n}/),c);
+  assert.deepEqual(JSON.parse(JSON.stringify(c.sanitizeSel({coll:'VODMusicVideos',key:'pub-sjj_1_VIDEO'}))),{coll:'VODMusicVideos',key:'pub-sjj_1_VIDEO'});
+  for(const bad of [null,{},{coll:'<x>',key:'a'},{coll:'A',key:'a b'},{coll:1,key:'a'}])assert.deepEqual(JSON.parse(JSON.stringify(c.sanitizeSel(bad))),{coll:'',key:''});
+});
+test('unavailable cell is black with translated text, no other video',()=>{
+  assert.match(html,/\.tile\.novideo \.nomsg \{ display:flex;[^}]*background:#000/);
+  assert.match(html,/\.tile\.novideo video \{ display:none; \}/);
+  assert.match(script,/nomsg\.textContent = t\('naText'\)/);
+  assert.match(script,/x\.nomsg\.textContent = t\('naText'\)/);
+  assert.match(script,/naText: 'No disponible en esta lengua'/);
+  assert.ok(dictKeys('es').includes('naText')&&dictKeys('en').includes('naText'));
+});
+
+test('older saved states are healed: blank-publication tiles in the selected collection become "not available", not first video',()=>{
+  const init=script.slice(script.indexOf('(async function init()'));
+  assert.match(init,/if \(!SEL\.key\) \{ const ref = restored\.find\(l => l\.prog\)/);
+  assert.match(init,/!l\.prog && !l\.want && l\.coll === SEL\.coll\) \? \{ \.\.\.l, want: SEL\.key \}/);
+});
+
+// ================= titles follow the interface language =================
+function titleWorld(byCode,lang){
+  const calls=[];
+  const c=vm.createContext({Array,Promise,Map,Math,String,Number,Object,API:'A',LANG:lang,tiles:new Map(),
+    fetchJSON:async u=>{const code=u.split('/categories/')[1].split('/')[0];calls.push(code);const h=byCode[code];if(!h)throw new Error('HTTP 404');return h(u);}});
+  vm.runInContext([grab(/function normKey\([^\n]*/),grab(/async function fetchCollection\([\s\S]*?\n}\n/),grab(/const UI_SOURCES[^\n]*/),'const titleCache = new Map();',
+    grab(/function titleKey\([^\n]*/),grab(/function uiTitles\([\s\S]*?\n}\n/),grab(/function localTitle\([^\n]*/),grab(/function localGroup\([^\n]*/)].join('\n'),c);
+  return {c,calls};
+}
+const own=(agn,title,group='')=>({naturalKey:agn.replace('_','_LSE_'),agnostic:agn,title,group});
+const mk=(agn,title)=>({type:'video',naturalKey:agn.replace('_','_X_'),languageAgnosticNaturalKey:agn,title});
+const listing=(group,...ms)=>()=>({category:{media:[],subcategories:[{key:'g',name:group,media:ms}]}});
+test('English UI: Spanish sign-language titles are shown in English, groups too; Spanish UI keeps Spanish',async()=>{
+  const lse=own('pub-osg_1_VIDEO','Vuelvan a vivir');
+  const w=titleWorld({E:listing('Original Songs',mk('pub-osg_1_VIDEO','Rise Again')),ASL:listing('x'),S:listing('Canciones originales',mk('pub-osg_1_VIDEO','Vuelvan a vivir')),LSE:listing('x')},'en');
+  const tm=await w.c.uiTitles('VODMusicVideos');
+  assert.equal(w.c.localTitle(lse,tm),'Rise Again');assert.equal(w.c.localGroup({...lse,group:'Canciones originales'},tm),'Original Songs');
+  const w2=titleWorld({E:listing('Original Songs',mk('pub-osg_1_VIDEO','Rise Again')),S:listing('Canciones originales',mk('pub-osg_1_VIDEO','Vuelvan a vivir')),ASL:listing('x'),LSE:listing('x')},'es');
+  assert.equal(w2.c.localTitle(lse,await w2.c.uiTitles('VODMusicVideos')),'Vuelvan a vivir');
+  assert.ok(w2.calls.every(c=>['S','LSE'].includes(c)),'Spanish UI never asks the English listing');assert.ok(w.calls.every(c=>['E','ASL'].includes(c)));
+});
+test('old songbook keys map to the renamed one (sjj -> sjjm), same songs',async()=>{
+  const w=titleWorld({E:listing('Meetings',mk('pub-sjjm_1_VIDEO',"1. Jehovah's Attributes")),ASL:listing('x')},'en');
+  const tm=await w.c.uiTitles('VODMusicVideos');
+  assert.equal(w.c.localTitle(own('pub-sjj_1_VIDEO','1. Las cualidades principales de Jehová'),tm),"1. Jehovah's Attributes");
+});
+test('items only present in sign languages fall back to an English-locale sign language, then to their own title',async()=>{
+  const w=titleWorld({E:listing('x'),ASL:listing('Sing to Jehovah—Meetings',mk('pub-sn_1_VIDEO','001 – Jehovah’s Attributes'))},'en');
+  const tm=await w.c.uiTitles('VODMusicVideos');
+  assert.equal(w.c.localTitle(own('pub-sn_1_VIDEO','001 – Atributos'),tm),'001 – Jehovah’s Attributes');
+  assert.equal(w.c.localTitle(own('pub-zz_9_VIDEO','Título propio'),tm),'Título propio');
+  assert.equal(w.c.localTitle(own('pub-zz_9_VIDEO','Título propio'),undefined),'Título propio');
+});
+test('failed title lookups are not cached and never break the list',async()=>{
+  let fail=true;const w=titleWorld({E:()=>{if(fail)throw new Error('x');return listing('g',mk('pub-a_1_VIDEO','A'))()},ASL:()=>{if(fail)throw new Error('x');return {category:{}}}},'en');
+  let tm=await w.c.uiTitles('C');assert.equal(tm.size,0);fail=false;tm=await w.c.uiTitles('C');assert.equal(tm.size,1);
+});
+test('labels use localTitle everywhere: tile lists, global list, and in-place relabel on language switch',()=>{
+  assert.match(script,/o\.textContent = localTitle\(it, tm\)/);
+  assert.match(script,/og\.label = localGroup\(arr\[0\], tm\)/);
+  assert.doesNotMatch(script,/o\.textContent = it\.title/);
+  assert.match(grab(/async function refreshGlobalPrograms\([\s\S]*?\n}\n/),/localTitle\(it, tm\)/);
+  const sl=grab(/function setLang\([\s\S]*?\n}\n/);assert.match(sl,/for \(const x of tiles\.values\(\)\) relabelTile\(x\)/);
+  const r=grab(/async function relabelTile\([\s\S]*?\n}\n/);assert.doesNotMatch(r,/x\.video|\.load\(\)|loadTileProgram|fillPrograms/,'switching language never touches the videos');
+  assert.match(script,/if \(lang0 !== LANG\) tm = await uiTitles/);
+});
+
+// ================= nothing plays by itself: load paused, then play together =================
+test('loading a tile never plays it; the source is set and the video waits paused',async()=>{
+  const w=tileWorld(()=>songs('pub-x_LSE_1_VIDEO'));
+  await w.c.fillPrograms(w.entry,'pub-x_LSE_1_VIDEO',true);
+  assert.equal(w.video.src,'https://cdn/pub-x_LSE_1_VIDEO_r240P.mp4');assert.equal(w.video.played,0);assert.equal(w.video.paused,true);assert.equal(w.entry.shouldPlay,false);
+});
+test('a new publication on a playing tile loads paused too',async()=>{
+  const w=tileWorld(()=>songs('a_LSE_1_VIDEO','b_LSE_2_VIDEO'));w.entry.shouldPlay=true;
+  await w.c.fillPrograms(w.entry,'b_LSE_2_VIDEO',true);assert.equal(w.entry.shouldPlay,false);assert.equal(w.video.played,0);
+});
+test('retry of a failed tile reloads without playing',async()=>{
+  const w=tileWorld(()=>songs('pub-x_LSE_1_VIDEO'));await w.c.fillPrograms(w.entry,'pub-x_LSE_1_VIDEO',true);
+  w.entry.status.classList.add('err');w.entry.status.style.display='';w.entry.shouldPlay=true;
+  await w.c.retryEntry(w.entry);assert.equal(w.video.played,0);assert.equal(w.entry.shouldPlay,false);
+});
+test('only Play all / Sync start playback; Pause all clears every intent',async()=>{
+  const vs=[new FV(),new FV()];const w=syncWorld(vs);
+  await sleep(5);assert.deepEqual(vs.map(v=>v.played),[0,0],'nothing plays before Play all');
+  await w.run('startTogether()');assert.deepEqual(vs.map(v=>v.played),[1,1]);
+  assert.equal([...w.c.tiles.values()].every(x=>x.shouldPlay),true);
+  assert.match(script,/for \(const x of tiles\.values\(\)\) \{ x\.shouldPlay = false; x\.video\.pause\(\); \}/);
+});
+test('static: no autoplay, no play() outside startTogether and the intent-gated safety net',()=>{
+  assert.match(script,/video\.autoplay = false/);
+  const plays=[...script.matchAll(/\.play\(\)/g)].length;
+  assert.equal(plays,2,'startTogether and autoResume only');
+  assert.match(grab(/function autoResume\(\) \{[\s\S]*?\n}/),/x\.shouldPlay && x\.video\.src/);
+  assert.match(script,/video\.addEventListener\('loadeddata', loaded\)/,'a loaded paused tile does not stay on "Loading…"');
+});
+
+test('Remove all: stops a running Add-all loop and a restore, and a late list load never revives a tile',async()=>{
+  assert.match(script,/function removeAllTiles\(\) \{\s*mosaicGen\+\+; stopAddingAll = true;/);
+  assert.match(script,/if \(stopAddingAll \|\| gen !== mosaicGen\) break;/);
+  assert.match(script,/if \(gen0 !== mosaicGen\) break;/);
+  assert.match(script,/if \(tiles\.get\(entry\.code\) !== entry\) return;/);
+  const mk=()=>({paused:false,pause(){this.paused=true},removeAttribute(){},load(){}});
+  const removed=[];
+  const c=vm.createContext({tiles:new Map(),clearTimeout,Promise,setTimeout,Array,
+    updateRetryUI(){},updateCounter(){},saveState(){},refreshGlobalPicker(){},renderAddList(){},cancelSync(){c.cancelled=true},cancelled:false});
+  vm.runInContext('let mosaicGen = 0; let stopAddingAll = false; let audible = {};'+grab(/function cancelRetry\([^\n]*\n/)+grab(/function removeAllTiles\(\) \{[\s\S]*?\n}\n/),c);
+  const vids=[mk(),mk(),mk()];
+  vids.forEach((v,i)=>c.tiles.set('L'+i,{video:v,tile:{remove(){removed.push(i)}}}));
+  vm.runInContext('removeAllTiles()',c);
+  assert.equal(c.tiles.size,0);assert.deepEqual(removed,[0,1,2]);assert.ok(vids.every(v=>v.paused));
+  assert.equal(vm.runInContext('mosaicGen',c),1);assert.equal(vm.runInContext('stopAddingAll',c),true);
+  assert.equal(vm.runInContext('audible',c),null);assert.ok(c.cancelled);
+  // the guard in loadTileProgram: a removed entry is ignored
+  const c2=vm.createContext({tiles:new Map(),SEL:{},clearTimeout});
+  vm.runInContext(grab(/function cancelRetry\([^\n]*\n/)+grab(/async function loadTileProgram\(entry, item\) \{[\s\S]*?\n}\n/),c2);
+  const ghost={code:'X',video:mk(),status:{},tile:{classList:{remove(){throw new Error('touched')},add(){}}}};
+  await vm.runInContext('loadTileProgram',c2)(ghost,{naturalKey:'k',media:{}}); // not in tiles: returns before touching anything
+  assert.equal(ghost.prog,undefined);
+});
+
+function retryWorld(){
+  const c=vm.createContext({tiles:new Map(),setTimeout,clearTimeout});
+  vm.runInContext(grab(/function cancelRetry\([^\n]*\n/)+grab(/function scheduleRetry\([\s\S]*?\n}\n/),c);
+  const mkv=(src)=>({src,loads:0,load(){this.loads++}});
+  return {c,mkv};
+}
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+test('auto-retry: error then Remove all, the timer never restores the source',async()=>{
+  const {c,mkv}=retryWorld();const x={code:'L',video:mkv('A'),armWatchdog(){this.armed=true}};c.tiles.set('L',x);
+  c.scheduleRetry(x,20);c.tiles.clear();vm.runInContext('1',c);
+  await wait(60);assert.equal(x.video.src,'A');assert.equal(x.video.loads,0);assert.ok(!x.armed);
+  // and the explicit cancel clears the timer too
+  const y={code:'M',video:mkv('A')};c.tiles.set('M',y);c.scheduleRetry(y,20);c.cancelRetry(y);await wait(60);assert.equal(y.video.loads,0);
+});
+test('auto-retry: error then another source, the timer never goes back to the old one',async()=>{
+  const {c,mkv}=retryWorld();const x={code:'L',video:mkv('songA')};c.tiles.set('L',x);
+  c.scheduleRetry(x,20);x.video.src='songB'; // no cancel: the identity guard alone must hold
+  await wait(60);assert.equal(x.video.src,'songB');assert.equal(x.video.loads,0);
+});
+test('auto-retry: a live tile with the same source is reloaded once',async()=>{
+  const {c,mkv}=retryWorld();const x={code:'L',video:mkv('songA'),armWatchdog(){this.armed=true}};c.tiles.set('L',x);
+  c.scheduleRetry(x,20);await wait(60);assert.equal(x.video.src,'songA');assert.equal(x.video.loads,1);assert.ok(x.armed);
+});
+test('auto-retry wiring: error handler uses scheduleRetry; source change, tile ✕ and Remove all cancel it',()=>{
+  assert.match(script,/setStatus\(entry, 'retrying'\);\s*scheduleRetry\(entry, 3000\);/);
+  assert.match(script.match(/async function loadTileProgram[\s\S]*?\n}\n/)[0],/cancelRetry\(entry\)/);
+  assert.match(script,/cancelRetry\(entry\); video\.pause\(\)/);
+  assert.match(script.match(/function removeAllTiles[\s\S]*?\n}\n/)[0],/cancelRetry\(x\)/);
+  assert.match(script.match(/async function retryEntry[\s\S]*?\n}\n/)[0],/removed while queued/);
+});
+
+test('Pause all: after it nothing replays by itself, including tiles added later, until Play all',async()=>{
+  const a=new FV(),b=new FV();const w=syncWorld([a,b]);
+  await w.run('startTogether()');assert.equal(a.played,1);assert.equal(b.played,1);
+  // the real Pause all handler
+  const h=script.match(/getElementById\('pauseAll'\)\.addEventListener\('click', \(\) => \{([^\n]*)\}\);/)[1];
+  w.run('(()=>{'+h+'})()');
+  assert.ok(a.paused&&b.paused);assert.ok([...w.c.tiles.values()].every(x=>x.shouldPlay===false));
+  const late=new FV();w.c.tiles.set('LATE',(function(v){return {video:v,tile:{classList:{contains:()=>false}},code:'LATE'}})(late));
+  for(let i=0;i<4;i++)w.run('autoResume()'); // four 15 s ticks
+  assert.equal(a.played,1);assert.equal(b.played,1);assert.equal(late.played,0,'a tile added after Pause all stays paused');
+  // even if the pause flag were lost, only tiles that Play all started may be resumed
+  w.run('userPaused=false;autoResume()');assert.equal(a.played,1);assert.equal(late.played,0);
+  // Play all starts everyone again, together
+  await w.run('startTogether()');assert.equal(late.played,1);assert.equal(a.played,2);
+});
