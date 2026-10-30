@@ -189,7 +189,14 @@ const I18N = {
     footer: 'Videos served directly from jw.org servers (public API and CDN). Personal tool, not affiliated or endorsed. Simultaneous playback depends on video availability and your device.'
   }
 };
-let LANG = (localStorage.getItem('jwSignMosaic.lang') || (navigator.language || 'es')).toLowerCase().startsWith('en') ? 'en' : 'es';
+// Storage is optional: blocked access or a full quota must not stop playback.
+function readStored(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+function writeStored(key, value) {
+  try { localStorage.setItem(key, value); return true; } catch (e) { return false; }
+}
+let LANG = (readStored('jwSignMosaic.lang') || (navigator.language || 'es')).toLowerCase().startsWith('en') ? 'en' : 'es';
 const t = k => I18N[LANG][k];
 
 const DEFAULT_CODES = ['LSE','ASL','BSL','LSB','LSM','LSF','ISL','DGS'];
@@ -223,11 +230,11 @@ function sanitizeSel(s) {
 }
 function loadState() {
   try {
-    const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+    const saved = JSON.parse(readStored(LS_KEY) || 'null');
     if (saved && Array.isArray(saved.langs) && saved.langs.length) return saved;
   } catch (e) {}
   try { // migration from v1
-    const old = JSON.parse(localStorage.getItem('jwSignMosaic.langs.v1') || 'null');
+    const old = JSON.parse(readStored('jwSignMosaic.langs.v1') || 'null');
     if (Array.isArray(old) && old.length) return { langs: old };
   } catch (e) {}
   return { langs: DEFAULT_CODES.map(c => ({ code: c })) };
@@ -235,7 +242,7 @@ function loadState() {
 function saveState() {
   // want = the publication a tile was asked for but could not show; without it a reload would load the first video
   const langs = [...tiles.values()].map(x => ({ code: x.code, coll: x.coll, prog: x.prog, want: x.want || '' }));
-  localStorage.setItem(LS_KEY, JSON.stringify({ langs, sel: SEL }));
+  writeStored(LS_KEY, JSON.stringify({ langs, sel: SEL }));
 }
 function updateCounter() { document.getElementById('counter').textContent = t('counter')(tiles.size); }
 function sortTiles() { // tiles with the publication first, unavailable last; stable, keeps playback
@@ -474,7 +481,7 @@ async function startTogether() {
 
 const VOL_KEY = 'jwSignMosaic.vol';
 function clampVolume(x) { const n = Number(x); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1; }
-const savedVol = localStorage.getItem(VOL_KEY);
+const savedVol = readStored(VOL_KEY);
 let masterVol = clampVolume(savedVol === null ? 1 : savedVol);
 let audible = null; // the only tile that may produce sound
 function muteOthers(except) { // pass null to silence every tile
@@ -489,7 +496,7 @@ function muteOthers(except) { // pass null to silence every tile
 function setMasterVolume(v) {
   masterVol = clampVolume(v);
   document.getElementById('vol').value = masterVol;
-  localStorage.setItem(VOL_KEY, String(masterVol));
+  writeStored(VOL_KEY, String(masterVol));
   for (const x of tiles.values()) x.video.volume = masterVol;
 }
 // The native player controls can also unmute a tile or change its volume: keep one audible tile and one volume.
@@ -934,7 +941,7 @@ function applyI18n() {
 function setLang(l) {
   if (l === LANG) return;
   LANG = l;
-  localStorage.setItem('jwSignMosaic.lang', l);
+  writeStored('jwSignMosaic.lang', l);
   applyI18n();
   for (const x of tiles.values()) { // re-translate in place, without touching the videos
     const prev = x.selColl.value;
