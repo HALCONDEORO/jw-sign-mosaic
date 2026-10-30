@@ -55,6 +55,7 @@
   #addList button:hover { background:#21262d; }
   #addList button.added { color:var(--muted); }
   .counter { color:var(--muted); font-size:13px; }
+  .tile .note { font-size:12px; color:var(--muted); padding:0 8px 6px; }
   .globrow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:8px 18px; border-bottom:1px solid var(--border); background:#0a0d12; font-size:13px; color:var(--muted); }
 </style>
 </head>
@@ -96,6 +97,9 @@
   <span id="tForAll">Para todas:</span>
   <select id="globColl" aria-label="Section for all tiles"></select>
   <select id="globProg" aria-label="Publication for all tiles"></select>
+  <select id="gBook" hidden></select>
+  <select id="gChap" hidden></select>
+  <select id="gVerse" hidden></select>
   <button id="globApply"></button>
 </div>
 <div class="globrow" id="jumpRow">
@@ -126,6 +130,7 @@ const I18N = {
     counter: n => n + ' lenguas seleccionadas',
     loading: 'Cargando…', retrying: 'Reintentando…',
     slowMsg: 'Sigue sin cargar. Toca aquí para reintentar.',
+    bibleColl: 'Biblia: libro, capítulo y versículo', wholeChapter: 'Capítulo completo', bookLbl: 'Libro', chapLbl: 'Capítulo', verseLbl: 'Versículo', noVerseMark: 'Sin marcador de este versículo: empieza al inicio del capítulo.',
     noEquiv: 'Esta publicación no está disponible en esta lengua.',
     loadErr: e => 'Error al cargar (' + e + ')',
     failMsg: 'No se pudo cargar el vídeo. Toca aquí o usa Reintentar fallidas.',
@@ -162,6 +167,7 @@ const I18N = {
     counter: n => n + ' languages selected',
     loading: 'Loading…', retrying: 'Retrying…',
     slowMsg: 'Still not loading. Tap here to retry.',
+    bibleColl: 'Bible: book, chapter and verse', wholeChapter: 'Whole chapter', bookLbl: 'Book', chapLbl: 'Chapter', verseLbl: 'Verse', noVerseMark: 'No marker for this verse: starts at the beginning of the chapter.',
     noEquiv: 'This publication is not available in this language.',
     loadErr: e => 'Load error (' + e + ')',
     failMsg: 'The video failed to load. Tap here or use Retry failed.',
@@ -215,6 +221,7 @@ function collectionsFor() { return [
   ['VODOurActivities', LANG === 'es' ? 'Qué hacemos' : 'What we do'],
   ['VODOurOrganization', LANG === 'es' ? 'Nuestra organización' : 'Our organization'],
   ['VODBible', LANG === 'es' ? 'La Biblia' : 'The Bible'],
+  ['BIBLE', t('bibleColl')],
   ['VODMovies', LANG === 'es' ? 'Producciones audiovisuales' : 'Movies'],
   ['VODIntExp', LANG === 'es' ? 'Entrevistas y experiencias' : 'Interviews and experiences'],
 ]; }
@@ -335,6 +342,49 @@ async function fetchCollection(code, collKey) {
   return out;
 }
 
+// ---- Bible passage (book, chapter, verse) -----------------------------------------------------------
+// The sign-language Bible is not in the mediator listings: it comes from the pub-media API, one video per chapter, with verse markers.
+// Names and chapter counts were checked against that API (66 books, 1189 chapters).
+const PUBMEDIA = 'https://b.jw-cdn.org/apis/pub-media/GETPUBMEDIALINKS?output=json&pub=nwt&fileformat=MP4&alllangs=0';
+const BIBLE_NAMES = {"en": ["Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs", "Ecclesiastes", "Song of Solomon (Canticles)", "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi", "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians", "1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"], "es": ["Génesis", "Éxodo", "Levítico", "Números", "Deuteronomio", "Josué", "Jueces", "Rut", "1 Samuel", "2 Samuel", "1 Reyes", "2 Reyes", "1 Crónicas", "2 Crónicas", "Esdras", "Nehemías", "Ester", "Job", "Salmos", "Proverbios", "Eclesiastés", "El Cantar de los Cantares", "Isaías", "Jeremías", "Lamentaciones", "Ezequiel", "Daniel", "Oseas", "Joel", "Amós", "Abdías", "Jonás", "Miqueas", "Nahúm", "Habacuc", "Sofonías", "Ageo", "Zacarías", "Malaquías", "Mateo", "Marcos", "Lucas", "Juan", "Hechos", "Romanos", "1 Corintios", "2 Corintios", "Gálatas", "Efesios", "Filipenses", "Colosenses", "1 Tesalonicenses", "2 Tesalonicenses", "1 Timoteo", "2 Timoteo", "Tito", "Filemón", "Hebreos", "Santiago", "1 Pedro", "2 Pedro", "1 Juan", "2 Juan", "3 Juan", "Judas", "Revelación (Apocalipsis)"]};
+const BIBLE_CHAPTERS = [50, 40, 27, 36, 34, 24, 21, 4, 31, 24, 22, 25, 29, 36, 10, 13, 10, 42, 150, 31, 12, 8, 66, 52, 5, 48, 12, 14, 3, 9, 1, 4, 7, 3, 3, 3, 2, 14, 4, 28, 16, 24, 21, 28, 16, 16, 13, 6, 6, 4, 4, 5, 3, 6, 4, 3, 1, 13, 5, 5, 3, 5, 1, 1, 1, 22];
+function bibleKey(b, c, v) { return 'bible_' + b + '_' + c + (v ? '_' + v : ''); }
+function parseBibleKey(k) {
+  const m = /^bible_(\d{1,2})_(\d{1,3})(?:_(\d{1,3}))?$/.exec(String(k || ''));
+  if (!m) return null;
+  const book = +m[1], chapter = +m[2], verse = m[3] ? +m[3] : 0;
+  if (book < 1 || book > 66 || chapter < 1 || chapter > BIBLE_CHAPTERS[book - 1]) return null;
+  return { book, chapter, verse };
+}
+function bibleLabel(p) { return BIBLE_NAMES[LANG][p.book - 1] + ' ' + p.chapter + (p.verse ? ':' + p.verse : ''); }
+function timeToSec(s) { const m = /^(\d+):(\d{2}):(\d{2}(?:\.\d+)?)$/.exec(String(s || '')); return m ? (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]) : NaN; }
+let BIBLE_TIMEOUT = 25000; // a hung request becomes a retriable failure
+const bibleCache = new Map();
+// -> { state: 'ok' | 'none' | 'failed', src, duration, verses: Map verse -> seconds }. 'none' only when the API answers that this language has no such chapter.
+function fetchBibleChapter(code, book, chapter) {
+  const ck = code + '|' + book + '|' + chapter;
+  if (!bibleCache.has(ck)) {
+    const work = (async () => {
+      let d;
+      try { d = await fetchJSON(PUBMEDIA + '&langwritten=' + encodeURIComponent(code) + '&booknum=' + book + '&track=' + chapter); }
+      catch (e) { return /HTTP 404/.test(String(e && e.message)) ? { state: 'none' } : { state: 'failed' }; }
+      const files = ((d.files || {})[code] || {}).MP4 || [];
+      const withRes = files.filter(f => f && f.file && /^https:\/\//.test(f.file.url || '') && f.track === chapter)
+        .map(f => ({ f, res: +((/_r(\d+)P\.mp4/.exec(f.file.url) || [])[1] || 9999) })).sort((a, b) => a.res - b.res);
+      if (!withRes.length) return { state: 'none' };
+      const verses = new Map();
+      for (const f of files) for (const mk of ((f.markers && f.markers.markers) || [])) { const sec = timeToSec(mk.startTime); if (Number.isFinite(sec) && Number.isInteger(mk.verseNumber) && !verses.has(mk.verseNumber)) verses.set(mk.verseNumber, sec); }
+      return { state: 'ok', src: withRes[0].f.file.url, duration: withRes[0].f.duration, verses };
+    })();
+    let timer;
+    const p = Promise.race([work, new Promise(res => { timer = setTimeout(() => res({ state: 'failed' }), BIBLE_TIMEOUT); })]);
+    work.then(() => clearTimeout(timer), () => clearTimeout(timer));
+    bibleCache.set(ck, p);
+    p.then(r => { if (r.state === 'failed') bibleCache.delete(ck); });
+  }
+  return bibleCache.get(ck);
+}
+
 // ---- Titles in the interface language -------------------------------------------------------------
 // A sign-language listing carries titles in that language's own locale (Spanish SL -> Spanish, ASL -> English). Labels follow the
 // interface language instead: the English or Spanish listing first, then an English-/Spanish-locale sign language for items
@@ -358,6 +408,7 @@ function uiTitles(coll) { // Promise<Map titleKey -> {title, group}>; failures a
 function localTitle(it, tm) { const e = tm && tm.get(titleKey(it)); return e && e.title ? e.title : it.title; }
 function localGroup(it, tm) { const e = tm && tm.get(titleKey(it)); return e && e.group ? e.group : it.group; }
 async function relabelTile(x) { // interface language changed: relabel the existing options in place, the video is not touched
+  if (x.coll === 'BIBLE') { for (const o of x.sel.querySelectorAll('option')) { const p = parseBibleKey(o.value); if (p) o.textContent = bibleLabel(p); } return; }
   const tm = await uiTitles(x.coll);
   const byKey = new Map((x.items || []).map(it => [it.naturalKey, it]));
   for (const o of x.sel.querySelectorAll('option')) { const it = byKey.get(o.value); if (it) o.textContent = localTitle(it, tm); }
@@ -463,12 +514,14 @@ async function startTogether() {
     snaps = snaps.filter((s, i) => ready[i] && stillValid(s));
     if (!snaps.length) { skipped = total; all.forEach(markSkipped); return; }
     const target = syncTarget(snaps.map(s => s.v.currentTime), snaps.map(s => s.v.duration));
-    const seeked = await Promise.all(snaps.map(s => seekTo(s.v, target, SYNC_TIMEOUTS.seek)));
+    // A Bible passage starts each tile at its own verse (the languages sign at different times); every other video uses the common timestamp.
+    const targetOf = s => { const x = entryOf(s.v); return (x && Number.isFinite(x.startAt)) ? x.startAt : target; };
+    const seeked = await Promise.all(snaps.map(s => seekTo(s.v, targetOf(s), SYNC_TIMEOUTS.seek)));
     if (cancelled()) return;
     snaps = snaps.filter((s, i) => seeked[i] && stillValid(s));
     const settled = await Promise.all(snaps.map(s => waitReady(s.v, SYNC_TIMEOUTS.settle)));
     if (cancelled()) return;
-    snaps = snaps.filter((s, i) => settled[i] && stillValid(s) && s.v.readyState >= 2 && Math.abs(s.v.currentTime - target) <= 0.5);
+    snaps = snaps.filter((s, i) => settled[i] && stillValid(s) && s.v.readyState >= 2 && Math.abs(s.v.currentTime - targetOf(s)) <= 0.5);
     const played = await Promise.all(snaps.map(s => s.v.play().then(() => true, () => false))); // a rejected play() is not a sync either
     const ok = new Set(snaps.filter((s, i) => played[i]));
     skipped = total - ok.size;
@@ -538,6 +591,7 @@ async function loadTileProgram(entry, item) {
   entry.shouldPlay = false; // a new source always loads paused
   if (item) entry.want = '';
   tile.classList.remove('indet');
+  entry.startAt = undefined; entry.note.textContent = '';
   if (!item) {
     tile.classList.add('novideo');
     video.pause(); video.removeAttribute('src'); video.load();
@@ -547,7 +601,9 @@ async function loadTileProgram(entry, item) {
   }
   tile.classList.remove('novideo');
   try {
-    const src = pickFile(item.media || {});
+    const src = item.bibleSrc || pickFile(item.media || {});
+    entry.startAt = item.bibleSrc ? item.startAt : undefined; // Bible passages open at their verse; other videos at the start
+    entry.note.textContent = item.verseNote ? t('noVerseMark') : '';
     if (src) {
       setStatus(entry, 'loading');
       video.src = src; video.load(); // load paused; playback starts only from Play all / Sync
@@ -557,7 +613,42 @@ async function loadTileProgram(entry, item) {
   saveState(); refreshGlobalPicker(); sortTiles();
 }
 
+async function fillBible(entry, key, listOnly) {
+  if (listOnly) return;
+  const p = parseBibleKey(key) || parseBibleKey(SEL.coll === 'BIBLE' ? SEL.key : '') || { book: 43, chapter: 3, verse: 0 };
+  key = bibleKey(p.book, p.chapter, p.verse);
+  const req = entry.bibleReq = (entry.bibleReq || 0) + 1;
+  // Asking for a passage invalidates the old one at once, not when the answer arrives: the old video stops, no retry or
+  // auto-resume can bring it back, and the request is kept for Retry and the saved state even if the network hangs.
+  cancelRetry(entry);
+  entry.shouldPlay = false; entry.startAt = undefined; entry.note.textContent = '';
+  entry.video.pause(); entry.video.removeAttribute('src'); entry.video.load();
+  entry.items = []; entry.partial = false; entry.sel.classList.remove('partial'); entry.sel.title = '';
+  entry.prog = ''; entry.want = key;
+  entry.tile.classList.remove('novideo', 'indet');
+  entry.sel.innerHTML = '';
+  const o = document.createElement('option'); o.value = key; o.textContent = bibleLabel(p); entry.sel.appendChild(o);
+  entry.sel.selectedIndex = 0;
+  setStatus(entry, 'loading');
+  saveState();
+  const r = await fetchBibleChapter(entry.code, p.book, p.chapter);
+  if (tiles.get(entry.code) !== entry || entry.coll !== 'BIBLE' || req !== entry.bibleReq) return; // removed, or another request replaced this one
+  if (r.state === 'failed') { // the request failed: keep the passage so Retry can ask again
+    entry.prog = key; entry.want = key; entry.shouldPlay = false;
+    entry.tile.classList.add('novideo', 'indet');
+    entry.video.pause(); entry.video.removeAttribute('src'); entry.video.load();
+    setStatus(entry, 'loadErr', 'network', true); saveState(); sortTiles(); return;
+  }
+  if (r.state === 'none') { markUnavailable(entry, key); return; } // this language has no such chapter: black cell, never another passage
+  const start = p.verse ? r.verses.get(p.verse) : 0;
+  const item = { naturalKey: key, title: bibleLabel(p), group: '', media: null, bibleSrc: r.src, startAt: Number.isFinite(start) ? start : 0, verseNote: !!(p.verse && !Number.isFinite(start)) };
+  entry.items = [item];
+  entry.sel.selectedIndex = 0;
+  await loadTileProgram(entry, item);
+}
+
 async function fillPrograms(entry, keepProg, strict, deferLoad, listOnly) {
+  if (entry.coll === 'BIBLE') return fillBible(entry, keepProg, listOnly);
   const { code, sel } = entry;
   const lang0 = LANG;
   let [items, tm] = await Promise.all([fetchCollection(code, entry.coll), uiTitles(entry.coll)]);
@@ -614,11 +705,13 @@ async function addTile(lang) {
     <select class="colls" style="margin:0 8px 4px;font-size:12px;max-width:calc(100% - 16px)"></select>
     <select class="programs" style="margin:0 8px 6px;font-size:12px;max-width:calc(100% - 16px)"></select>
     <div class="videowrap"></div>
-    <div class="status" role="status">${t('loading')}</div>`;
+    <div class="status" role="status">${t('loading')}</div>
+    <div class="note"></div>`;
   grid.appendChild(tile);
   const langLabel = lang.label || labelFor(lang.code);
   tile.querySelector('.lang').textContent = langLabel;
   const status = tile.querySelector('.status');
+  const note = tile.querySelector('.note');
   const selColl = tile.querySelector('.colls');
   const sel = tile.querySelector('.programs');
   const wrap = tile.querySelector('.videowrap');
@@ -643,6 +736,7 @@ async function addTile(lang) {
   };
   const loaded = () => { clearTimeout(loadTimer); status.style.display = 'none'; updateRetryUI(); };
   video.addEventListener('playing', loaded);
+  video.addEventListener('loadedmetadata', () => { if (entry.startAt > 0 && Number.isFinite(video.duration) && entry.startAt < video.duration) video.currentTime = entry.startAt; }); // Bible verse start
   video.addEventListener('loadeddata', loaded); // first frame ready: the tile is loaded and waits paused
   let retried = false;
   video.addEventListener('error', () => {
@@ -664,7 +758,7 @@ async function addTile(lang) {
   selColl.setAttribute('aria-label', t('collLbl') + ' — ' + langLabel);
   sel.setAttribute('aria-label', t('progLbl') + ' — ' + langLabel);
   const entry = { code: lang.code, coll: lang.coll || 'StudioMonthlyPrograms', prog: lang.prog || '',
-                  video, audioBtn: tile.querySelector('.audio'), tile, sel, selColl, status, items: [], armWatchdog, resetRetry, nomsg, want: lang.want || '', statusKey: 'loading' };
+                  video, audioBtn: tile.querySelector('.audio'), tile, sel, selColl, status, items: [], armWatchdog, resetRetry, nomsg, note, want: lang.want || '', statusKey: 'loading' };
   tiles.set(lang.code, entry);
   selColl.value = entry.coll;
   updateCounter(); saveState(); refreshGlobalPicker();
@@ -714,6 +808,8 @@ async function refreshGlobalPrograms(keepProg) {
   const req = ++globProgReq;
   const gc = document.getElementById('globColl');
   const gp = document.getElementById('globProg');
+  showGlobalMode(gc.value === 'BIBLE');
+  if (gc.value === 'BIBLE') { await buildGlobalBible(); return; }
   const first = [...tiles.values()][0];
   gp.innerHTML = '';
   if (!first || !gc.value) return;
@@ -723,6 +819,55 @@ async function refreshGlobalPrograms(keepProg) {
   let idx = 0;
   if (keepProg) { const k = items.findIndex(it => normKey(it) === keepProg); if (k >= 0) idx = k; }
   gp.selectedIndex = idx;
+}
+function showGlobalMode(bible) {
+  document.getElementById('globProg').hidden = bible;
+  for (const id of ['gBook', 'gChap', 'gVerse']) document.getElementById(id).hidden = !bible;
+}
+let bibleUiLang = '', gvReq = 0;
+function fillGlobalChapters(preferred) {
+  const gb = document.getElementById('gBook'), gc = document.getElementById('gChap');
+  const n = BIBLE_CHAPTERS[(+gb.value || 1) - 1];
+  gc.innerHTML = '';
+  for (let i = 1; i <= n; i++) { const o = document.createElement('option'); o.value = String(i); o.textContent = String(i); gc.appendChild(o); }
+  gc.value = String(preferred >= 1 && preferred <= n ? preferred : 1);
+  return fillGlobalVerses(0);
+}
+async function fillGlobalVerses(preferred) { // verse numbers come from the verse markers of the first tile that has this chapter
+  const gb = document.getElementById('gBook'), gc = document.getElementById('gChap'), gv = document.getElementById('gVerse');
+  const req = ++gvReq, book = +gb.value, chap = +gc.value;
+  gv.innerHTML = '';
+  const w = document.createElement('option'); w.value = ''; w.textContent = t('wholeChapter'); gv.appendChild(w);
+  for (const code of [...tiles.keys()].slice(0, 6)) {
+    const r = await fetchBibleChapter(code, book, chap);
+    if (req !== gvReq) return;
+    if (r.state === 'ok' && r.verses.size) {
+      for (const v of [...r.verses.keys()].sort((a, b) => a - b)) { const o = document.createElement('option'); o.value = String(v); o.textContent = String(v); gv.appendChild(o); }
+      gv.value = preferred && r.verses.has(preferred) ? String(preferred) : '';
+      return;
+    }
+  }
+}
+async function buildGlobalBible() {
+  if (bibleUiLang === LANG) return; // already built: the user's choice is kept
+  const gb = document.getElementById('gBook'), gc = document.getElementById('gChap'), gv = document.getElementById('gVerse');
+  const p = (SEL.coll === 'BIBLE' && parseBibleKey(SEL.key)) || { book: +gb.value || 43, chapter: +gc.value || 3, verse: +gv.value || 0 };
+  bibleUiLang = LANG;
+  gb.innerHTML = '';
+  BIBLE_NAMES[LANG].forEach((n, i) => { const o = document.createElement('option'); o.value = String(i + 1); o.textContent = n; gb.appendChild(o); });
+  gb.value = String(p.book);
+  gb.setAttribute('aria-label', t('bookLbl')); gc.setAttribute('aria-label', t('chapLbl')); gv.setAttribute('aria-label', t('verseLbl'));
+  await fillGlobalChapters(p.chapter);
+  await fillGlobalVerses(p.verse);
+}
+document.getElementById('gBook').addEventListener('change', () => fillGlobalChapters(1));
+document.getElementById('gChap').addEventListener('change', () => fillGlobalVerses(0));
+let globTouched = false; // the user changed the "For all" section by hand
+// Which section "For all" shows: the mosaic selection until the user picks one, then what the user picked; else the first tile's section.
+function pickGlobalColl(keys, sel, firstColl, prevColl, touched) {
+  if (!touched && sel && sel.coll && keys.includes(sel.coll)) return sel.coll;
+  if (prevColl && keys.includes(prevColl)) return prevColl;
+  return firstColl && keys.includes(firstColl) ? firstColl : '';
 }
 function refreshGlobalPicker(force) {
   const gc = document.getElementById('globColl');
@@ -735,18 +880,20 @@ function refreshGlobalPicker(force) {
   const prevColl = gc.value, prevProg = gp.value;
   gc.innerHTML = '';
   for (const [key, name] of collectionsFor()) { const o = document.createElement('option'); o.value = key; o.textContent = name; gc.appendChild(o); }
-  if (prevColl && [...gc.options].some(o => o.value === prevColl)) gc.value = prevColl;
-  else if (first) gc.value = first.coll;
+  const chosen = pickGlobalColl([...gc.options].map(o => o.value), SEL, first && first.coll, prevColl, globTouched);
+  if (chosen) gc.value = chosen;
   // the program picker always follows the chosen category
-  refreshGlobalPrograms(gc.value === prevColl ? prevProg : '');
+  refreshGlobalPrograms(gc.value === prevColl ? prevProg : (!globTouched && gc.value === SEL.coll ? SEL.key : ''));
 }
-document.getElementById('globColl').addEventListener('change', () => refreshGlobalPrograms(''));
+document.getElementById('globColl').addEventListener('change', () => { globTouched = true; refreshGlobalPrograms(''); });
 document.getElementById('globApply').addEventListener('click', async () => {
   const coll = document.getElementById('globColl').value;
-  const nk = document.getElementById('globProg').value;
+  const isBible = coll === 'BIBLE';
+  const nk = isBible ? bibleKey(+document.getElementById('gBook').value, +document.getElementById('gChap').value, +document.getElementById('gVerse').value || 0) : document.getElementById('globProg').value;
   if (nk) SEL = { coll, key: nk };
   const applyOne = async (x) => {
     x.selColl.value = coll;
+    if (isBible) { x.coll = coll; x.prog = ''; x.want = ''; x.shouldPlay = false; await fillBible(x, nk); return; }
     if (x.coll !== coll) { x.coll = coll; x.prog = ''; await fillPrograms(x, '', false, true); }
     if (nk) {
       const it = x.items.find(y => normKey(y) === nk);
@@ -955,6 +1102,7 @@ function setLang(l) {
     }
     x.sel.title = x.partial ? t('partialTip') : '';
     x.nomsg.textContent = t('naText');
+    if (x.note.textContent) x.note.textContent = t('noVerseMark');
     x.tile.querySelector('.audio').title = t('audioTip');
     x.tile.querySelector('.audio').setAttribute('aria-label', t('audioTip'));
     x.tile.querySelector('.fs').title = t('fsTip');
