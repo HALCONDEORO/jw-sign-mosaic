@@ -384,9 +384,12 @@ function loopVerse(x) { // true when the tile wrapped back to the start of its v
   return false;
 }
 function onVerseSeek(x) { x.loopPrev = x.video.currentTime; } // a seek is not a crossing
-function onVerseEnded(x) { // last verse runs to the chapter end: restart it only for a current tile that Play all / Sync started and nobody paused
+function onVerseEnded(x) { // the last verse runs to the chapter end: restart it only when playback reached the end naturally from inside the verse
   if (!x.loop || !Number.isFinite(x.startAt) || !x.shouldPlay || userPaused || syncing) return false;
   if (tiles.get(x.code) !== x || !x.video.src || x.video.src !== x.loopSrc || x.video.error || x.tile.classList.contains('novideo')) return false;
+  // A seek re-bases the last sample (onVerseSeek): only a sample inside the verse window may wrap, so a seek out of the verse invalidates the loop.
+  const prev = x.loopPrev;
+  if (!Number.isFinite(prev) || prev < x.startAt || (Number.isFinite(x.endAt) && prev >= x.endAt)) return false;
   x.video.currentTime = x.startAt; x.loopPrev = x.startAt;
   x.video.play().catch(() => {});
   return true;
