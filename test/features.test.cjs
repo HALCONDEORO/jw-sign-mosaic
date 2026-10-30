@@ -878,3 +878,53 @@ test('Publications wiring: section, selection, apply, restore and strict statics
   const fm=grab(/function fetchPubMedia\([\s\S]*?\n}\n/);
   assert.match(fm,/best\.size !== expected/,'track count must match exactly');
 });
+
+// --- Publications: review fixes ---
+test('fetchPubMedia: a single-video publication with two different tracks is not paired',async()=>{
+  const mk=(files)=>pubCtx({fetchJSON:async u=>({files:{DGS:{MP4:files}}})});
+  let c=mk([pubFile(1,240),pubFile(2,240)]);
+  assert.equal((await vm.runInContext("fetchPubMedia('DGS','jy')",c)).state,'none','two distinct tracks for a one-video publication');
+  c=mk([pubFile(7,720),pubFile(7,240)]);
+  const r=await vm.runInContext("fetchPubMedia('DGS','jy')",c);
+  assert.equal(r.state,'ok','one real track, any number, several resolutions');assert.equal(r.tracks.size,1);
+  assert.deepEqual([...r.tracks.keys()],[vm.runInContext("PUB_BY.get('jy')[1][0]",c)],'remapped to the expected track number');
+});
+function fakeDom(){
+  const els={};
+  const mk=(id)=>{const e={id,hidden:false,value:'',options:[],attrs:{},_html:'',
+    get innerHTML(){return this._html},set innerHTML(v){this._html=v;this.options=[];},
+    appendChild(o){this.options.push(o);if(this.options.length===1&&!this.value)this.value=o.value;},setAttribute(k,v){this.attrs[k]=v}};return e;};
+  for(const id of ['globProg','gBook','gChap','gVerse','gPub','gTrack'])els[id]=mk(id);
+  return {getElementById:id=>els[id],createElement:()=>({value:'',textContent:''}),els};
+}
+function pubUiCtx(){
+  const document=fakeDom();
+  const c=pubCtx({document,SEL:{coll:'',key:''},t:k=>k});
+  vm.runInContext('pubTrackTitles = async () => new Map();',c);
+  vm.runInContext([grab(/function showGlobalMode\([\s\S]*?\n}\n/),'let pubsUiLang = "", gtReq = 0;',grab(/async function fillGlobalTracks\([\s\S]*?\n}\n/),grab(/async function buildGlobalPubs\([\s\S]*?\n}\n/)].join('\n'),c);
+  return {c,document};
+}
+test('Publications picker: after another section and back, the video list is shown again (same language)',async()=>{
+  const {c,document}=pubUiCtx(),run=x=>vm.runInContext(x,c),els=document.els;
+  run("showGlobalMode('pubs')");await run('buildGlobalPubs()');
+  els.gPub.value='lmdv';await run('fillGlobalTracks(1)');
+  els.gTrack.value='5';
+  assert.equal(els.gTrack.hidden,false);assert.equal(els.gTrack.options.length,12);assert.equal(els.gPub.hidden,false);
+  run("showGlobalMode('')"); // another section
+  assert.equal(els.gPub.hidden,true);assert.equal(els.gTrack.hidden,true);
+  run("showGlobalMode('pubs')");await run('buildGlobalPubs()'); // same interface language: early path
+  assert.equal(els.gPub.hidden,false);assert.equal(els.gTrack.hidden,false,'video list visible again');assert.equal(els.gTrack.options.length,12);
+  assert.equal(els.gTrack.value,'5','the previous choice is kept');assert.equal(els.gPub.value,'lmdv');
+  els.gPub.value='jy';await run('fillGlobalTracks(1)');assert.equal(els.gTrack.hidden,true,'single-video publication has no video list');
+  run("showGlobalMode('')");run("showGlobalMode('pubs')");await run('buildGlobalPubs()');assert.equal(els.gTrack.hidden,true);
+  run("showGlobalMode('bible')");assert.equal(els.gPub.hidden,true);assert.equal(els.gBook.hidden,false);
+});
+test('Publication tile: without an interface-language title the label is neutral, never the tile\'s own language',async()=>{
+  const ok={state:'ok',tracks:new Map([[3,{src:'https://cdn/t3_r240P.mp4',title:'예수께서 눈먼 사람을 고쳐 주시다'}]])};
+  const w=pubFillWorld(ok);w.entry.code='KSL';w.c.tiles.clear();w.c.tiles.set('KSL',w.entry);
+  vm.runInContext('pubTrackTitles = async () => new Map();',w.c); // neither ASL nor LSE has this publication
+  await vm.runInContext('fillPub',w.c)(w.entry,'pub_lmdv_3');
+  assert.equal(w.log[0][0],'load');assert.equal(w.log[0][4],'Hacer discípulos: una obra de amor (videos) - #3');
+  assert.doesNotMatch(w.log[0][4],/예수/);
+  assert.doesNotMatch(grab(/async function fillPub\([\s\S]*?\n}\n/),/tr\.title/,'the tile\'s own title is never used for labels');
+});
