@@ -1196,3 +1196,49 @@ test('v1.3.0 keys exist in both languages',()=>{
   for(const k of ['qualLbl','qualTip','q240','q480','q720','mainTip','unmainTip','pipTip','gridLbl','catalogCached','listCached'])
     assert.ok(dictKeys('es').includes(k)&&dictKeys('en').includes(k),k);
 });
+
+// ================= review67 round 2 regressions =================
+test('quality swap sequences: old Pause all then native play resumes; Pause all after the swap cancels',()=>{
+  const c=vm.createContext({Number,Event,cancelRetry(){},tiles:new Map()});
+  vm.runInContext([grab(/function pickRes\([\s\S]*?\n}/),'let qualityPref=480;let userPaused=false;',grab(/function applyQuality\(\) \{[\s\S]*?\n}/),grab(/function resumeAfterSwap\(entry\) \{[\s\S]*?\n}/)].join('\n'),c);
+  const playLine=grab(/video\.addEventListener\('play'[^\n]*/);
+  const mkPlaying=()=>{const v=new FV({paused:false});v.load=()=>{};let u='https://cdn/a_r240P.mp4';Object.defineProperty(v,'src',{get:()=>u,set:x=>{u=x;v._t=0;v.paused=true}});return v;};
+  const mkEntry2=v=>({fileOptions:[{url:'https://cdn/a_r240P.mp4',res:240},{url:'https://cdn/a_r480P.mp4',res:480}],shouldPlay:false,tile:{classList:{contains:()=>false}},video:v,armWatchdog(){},loopSrc:'https://cdn/a_r240P.mp4'});
+  // Pause all long ago, then the user starts one tile from its native controls, then changes quality
+  const v1=mkPlaying(),e1=mkEntry2(v1);c.video=v1;c.tiles=new Map([['A',e1]]);
+  vm.runInContext(playLine,c);vm.runInContext('userPaused = true;',c);
+  v1.dispatchEvent(new Event('play')); // the native control's play fires the listener
+  assert.equal(vm.runInContext('userPaused',c),false,'a manual play supersedes an old Pause all');
+  vm.runInContext('applyQuality()',c);assert.equal(e1.resumeAfterSwap,true);
+  vm.runInContext('resumeAfterSwap(tiles.get("A"))',c);
+  assert.equal(v1.played,1,'the natively started tile keeps playing after the swap');
+  // Pause all AFTER the swap started still cancels the resume
+  const v2=mkPlaying(),e2=mkEntry2(v2);c.video=v2;c.tiles=new Map([['B',e2]]);
+  vm.runInContext(playLine,c);vm.runInContext('userPaused = false;',c);
+  vm.runInContext('applyQuality()',c);assert.equal(e2.resumeAfterSwap,true);
+  vm.runInContext('userPaused = true;',c);
+  vm.runInContext('resumeAfterSwap(tiles.get("B"))',c);
+  assert.equal(v2.played,0,'Pause all after the swap cancels the resume');
+});
+test('a selection from the cached listing loads while the API hangs and wins over the late refresh',async()=>{
+  let resolveLive;const live=new Promise(r=>{resolveLive=r});
+  const w=tileWorld(()=>live); // every API call hangs until released
+  w.c.metaRead=(k)=>k==='coll:LSE:VODStudio'?{ts:1000,data:[
+    {naturalKey:'cachedA',title:'Cached A',group:'',agnostic:'cachedA',files:[{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/cachedA_r240P.mp4'}]},
+    {naturalKey:'cachedB',title:'Cached B',group:'',agnostic:'cachedB',files:[{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/cachedB_r240P.mp4'}]}]}:null;
+  w.c.fmtDate=(ts)=>'date'+ts;
+  w.c.t=(k)=>k==='listCached'?(d=>'cached '+d):k;
+  const e=w.entry;e.prog='';e.coll='VODStudio';
+  const p=vm.runInContext('fillPrograms',w.c)(e,'',false,false,false);
+  await new Promise(r=>setTimeout(r,20));
+  assert.equal(e.items.length,2,'the saved listing is the working state, not just paint');
+  assert.equal(e.sel.children.length,2);assert.equal(e.cachedListTs,1000,'the saved copy date rides along');
+  const it=e.items.find(i=>i.naturalKey==='cachedB');
+  assert.ok(it,'the chosen cached publication exists in items');
+  await vm.runInContext('loadTileProgram',w.c)(e,it); // what the selector change does
+  assert.equal(e.prog,'cachedB');assert.equal(w.video.src,'https://cdn/cachedB_r240P.mp4');assert.ok(!e.tile.classList.contains('novideo'),'loads, never noVideoPub');
+  resolveLive({category:{media:[media('cachedA'),media('cachedB'),media('cachedC')]}});
+  await p; // the late refresh must not override the choice
+  assert.equal(e.prog,'cachedB');assert.equal(w.video.src,'https://cdn/cachedB_r240P.mp4','no reload over the user choice');
+  assert.equal(e.sel.children.length,3,'the live list still replaced the options');
+});

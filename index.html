@@ -1009,10 +1009,13 @@ async function fillPrograms(entry, keepProg, strict, deferLoad, listOnly) {
   const { code, sel } = entry;
   const lang0 = LANG;
   const pre0 = cachedListing(code, entry.coll); // the saved listing fills the selector at once; the live list replaces it below
+  const prog0 = entry.prog;
   if (pre0) {
     entry.cachedListTs = pre0.cachedTs;
+    entry.items = pre0; // working state, not just paint: a selection from the saved list loads while the network is still answering
     sel.innerHTML = '';
     for (const it of pre0) { const o = document.createElement('option'); o.value = it.naturalKey; o.textContent = localTitle(it, null); sel.appendChild(o); }
+    sel.value = entry.prog || '';
   }
   let [items, tm] = await Promise.all([fetchCollection(code, entry.coll), uiTitles(entry.coll)]);
   if (lang0 !== LANG) tm = await uiTitles(entry.coll); // the interface language changed while loading
@@ -1040,6 +1043,13 @@ async function fillPrograms(entry, keepProg, strict, deferLoad, listOnly) {
     }
   }
   if (listOnly) { sel.selectedIndex = items.findIndex(it => it.naturalKey === entry.prog); return; } // refresh the list only: the video keeps playing
+  if (pre0 && entry.prog !== prog0) { // the user chose from the saved list while the live one answered: that choice wins over the refresh
+    const pk = normKey({ naturalKey: entry.prog });
+    const ui = items.findIndex(it => it.naturalKey === entry.prog || (pk && normKey(it) === pk));
+    if (ui >= 0) { sel.selectedIndex = ui; return; } // already loading from the saved list: refresh the options only
+    if (items.partial) holdIndeterminate(entry, entry.prog); else markUnavailable(entry, entry.prog);
+    return;
+  }
   let idx = 0;
   if (keepProg) {
     const nk = normKey({ naturalKey: keepProg });
@@ -1110,6 +1120,7 @@ async function addTile(lang) {
   video.addEventListener('seeking', () => onVerseSeek(entry));
   video.addEventListener('seeked', () => onVerseSeek(entry));
   video.addEventListener('loadeddata', loaded); // first frame ready: the tile is loaded and waits paused
+  video.addEventListener('play', () => { userPaused = false; }); // starting one tile by hand supersedes an old Pause all
   let retried = false;
   video.addEventListener('error', () => {
     clearTimeout(loadTimer);
