@@ -14,7 +14,7 @@ The interface is available in English and Spanish (the ES / EN buttons in the to
 
 ## The mosaic
 
-Each tile is one sign language. A tile shows its language name and code, two selectors (Section and Publication), and the video with its own small controls: audio toggle for that language, fullscreen, and remove (✕).
+Each tile is one sign language. A tile shows its language name and code, two selectors (Section and Publication), and the video with its own small controls: audio toggle for that language, picture in picture (⧉, in browsers that support it), fullscreen, and remove (✕). The star (★) features that tile full-width at the top of the mosaic; starring another tile moves the feature, and starring the featured tile again returns it to the grid. Featuring only changes layout: the video keeps playing from the same position.
 
 The counter next to the main buttons shows how many languages are selected.
 
@@ -44,6 +44,8 @@ To put every tile on the passage, use the **For all** selectors at the top and p
 - **⏸ Pause all** pauses everything.
 - **Jump all to the same position**: the long slider moves every video to the same relative position (same percentage through each video), and **−10 s** / **+10 s** nudge all of them together. Outside Bible mode there are no chapter or song markers to jump to, so jumping is position based.
 - **Volume** is a single shared slider that sets the loudness of every tile. Only one tile has sound at a time: the tile's own audio button (or unmuting from its player controls) chooses which tile is audible, and the rest mute automatically.
+- **Quality** (240p / 480p / 720p) switches every loaded tile to that resolution when the publication offers it. 240p is the default because it is the easiest on data and battery with many tiles. Switching keeps each video's position and play/pause state.
+- **Keyboard shortcuts**: **K** or **Space** toggles play (pauses everything if anything is playing, otherwise starts the mosaic together), **S** syncs, **J** or **←** skips back 10 s, **L** or **→** skips forward 10 s. Shortcuts never fire while you type in a field or while a button is focused.
 
 ## Adding and removing languages
 
@@ -67,11 +69,11 @@ Tiles that loaded come first, then tiles with a load error, then tiles whose lan
 
 ## Sharing the mosaic
 
-**🔗 Copy link** builds a URL with your language list plus one shared section and publication (taken from the first tile that has a program). Per-tile programs, tile order, volume and playback position are not in the link. Anyone opening it gets those languages paused on that shared program, ready to play. The link goes to your clipboard when the browser allows it; otherwise the page shows it in a prompt for you to copy.
+**🔗 Copy link** builds a URL with the full mosaic state: your language list plus, for every tile, its own section and publication. Anyone opening it gets the same mosaic, paused and ready to play. Tile order, the featured tile, volume and playback position are not in the link. The link goes to your clipboard when the browser allows it; otherwise the page shows it in a prompt for you to copy.
 
 ## What the page saves
 
-Your selection (languages, section and program per tile) and the volume persist in your browser's localStorage, so the mosaic comes back as you left it. If the browser blocks storage or the quota is full, the page keeps working normally; it just does not save.
+Your selection (languages, section and program per tile), the featured tile, the chosen quality and the volume persist in your browser's localStorage, so the mosaic comes back as you left it. The catalogue and publication listings are also cached there as metadata (titles and links only, never media) so the page opens instantly; if the jw.org API is unreachable, the saved lists are shown with the date they were last updated. If the browser blocks storage or the quota is full, the page keeps working normally; it just does not save.
 
 ## Capacity note
 

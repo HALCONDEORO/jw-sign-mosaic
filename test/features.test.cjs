@@ -211,7 +211,7 @@ test('native mute of the audible tile silences all; native volume change moves t
 // --- listing errors: partial results are kept, flagged and retried; empty is not a failure ---
 function listWorld(handler){
   const c=vm.createContext({API:'A',fetchJSON:async(u)=>handler(u),Array,Promise});
-  vm.runInContext(grab(/async function fetchCollection\([\s\S]*?\n}\n/),c);return c;
+  vm.runInContext([grab(/async function fetchCollection\([\s\S]*?\n}\n/),grab(/function reviveItem\([\s\S]*?\n}/),grab(/function cachedListing\([\s\S]*?\n}/)].join('\n'),c);return c;
 }
 const vid=(k)=>({type:'video',naturalKey:k,title:k,languageAgnosticNaturalKey:k});
 test('fetchCollection: top-level failure is failed, genuinely empty is not',async()=>{
@@ -234,7 +234,7 @@ test('partial tiles count as failed, are retried list-only, and a failed refresh
   assert.ok(r.indexOf('fillPrograms(x, x.prog, false, false, true)')<r.indexOf('x.video.load()'));
   const f=grab(/async function fillPrograms\([\s\S]*?\n}\n/);
   assert.match(f,/if \(items\.failed && listOnly\) return;/);
-  assert.ok(f.indexOf('fetchCollection')<f.indexOf("sel.innerHTML = ''"),'list is fetched before the old one is cleared');
+  assert.ok(f.indexOf('await Promise.all([fetchCollection')<f.lastIndexOf("sel.innerHTML = ''"),'the live list is fetched before the current one is cleared; the provisional cached fill is the only earlier clear');
   assert.match(f,/if \(listOnly\) \{ sel\.selectedIndex/,'list-only refresh never reloads the video');
   assert.match(f,/if \(items\.failed\) \{ setStatus\(entry, 'loadErr'/);
 });
@@ -280,7 +280,8 @@ function tileWorld(handler){
   const c=vm.createContext({clearTimeout,setTimeout,Array,Promise,Map,Math,String,Number,Object,API:'A',LANG:'en',tiles:new Map(),fetchJSON:async u=>handler(u),
     document:{createElement:()=>el(),getElementById:()=>retryBtn},
     t:(k)=>k==='retryFailed'?(n=>'retry '+n):k,saveState(){},refreshGlobalPicker(){},sortTiles(){}});
-  vm.runInContext([grab(/function normKey\([^\n]*/),grab(/const UI_SOURCES[^\n]*/),'const titleCache = new Map();',grab(/function titleKey\([^\n]*/),grab(/function uiTitles\([\s\S]*?\n}\n/),grab(/function localTitle\([^\n]*/),grab(/function localGroup\([^\n]*/),grab(/function pickFile\([\s\S]*?\n}/),grab(/async function fetchCollection\([\s\S]*?\n}\n/),
+  vm.runInContext([grab(/function normKey\([^\n]*/),grab(/const UI_SOURCES[^\n]*/),'const titleCache = new Map();',grab(/function titleKey\([^\n]*/),grab(/function uiTitles\([\s\S]*?\n}\n/),grab(/function localTitle\([^\n]*/),grab(/function localGroup\([^\n]*/),grab(/function pickFile\([\s\S]*?\n}/),grab(/async function fetchCollection\([\s\S]*?\n}\n/),grab(/function reviveItem\([\s\S]*?\n}/),grab(/function cachedListing\([\s\S]*?\n}/),
+    grab(/function pickRes\([\s\S]*?\n}/),grab(/function fileOptions\([\s\S]*?\n}/),'let qualityPref = 240;',
     grab(/function setStatus\([\s\S]*?\n}/),grab(/function statusFailed\([^\n]*/),grab(/function isFailed\([^\n]*/),grab(/function updateRetryUI\([\s\S]*?\n}/),
     grab(/function markUnavailable\([\s\S]*?\n}/),grab(/function holdIndeterminate\([\s\S]*?\n}/),grab(/function cancelRetry\([^\n]*\n/),grab(/async function loadTileProgram\([\s\S]*?\n}/),
     grab(/async function fillPrograms\([\s\S]*?\n}\n/),grab(/async function retryEntry\([\s\S]*?\n}/)].join('\n'),c);
@@ -359,7 +360,7 @@ test('new tiles take the mosaic selection strictly; selection set by tile choice
   assert.match(a,/if \(SEL\.key\) \{[\s\S]*?inheritProg = SEL\.key;/);
   assert.match(script,/if \(it\) SEL = \{ coll: entry\.coll, key: normKey\(it\) \}/);
   assert.match(script,/if \(nk\) SEL = \{ coll, key: nk \}/);
-  assert.match(grab(/function saveState\([\s\S]*?\n}/),/JSON\.stringify\(\{ langs, sel: SEL \}\)/);
+  assert.match(grab(/function saveState\([\s\S]*?\n}/),/JSON\.stringify\(\{ langs, sel: SEL, main: mainCode \}\)/);
 });
 test('sanitizeSel rejects junk',()=>{
   const c=vm.createContext({});vm.runInContext(grab(/function sanitizeSel\([\s\S]*?\n}/),c);
@@ -386,7 +387,7 @@ function titleWorld(byCode,lang){
   const calls=[];
   const c=vm.createContext({Array,Promise,Map,Math,String,Number,Object,API:'A',LANG:lang,tiles:new Map(),
     fetchJSON:async u=>{const code=u.split('/categories/')[1].split('/')[0];calls.push(code);const h=byCode[code];if(!h)throw new Error('HTTP 404');return h(u);}});
-  vm.runInContext([grab(/function normKey\([^\n]*/),grab(/async function fetchCollection\([\s\S]*?\n}\n/),grab(/const UI_SOURCES[^\n]*/),'const titleCache = new Map();',
+  vm.runInContext([grab(/function normKey\([^\n]*/),grab(/async function fetchCollection\([\s\S]*?\n}\n/),grab(/function reviveItem\([\s\S]*?\n}/),grab(/function cachedListing\([\s\S]*?\n}/),grab(/const UI_SOURCES[^\n]*/),'const titleCache = new Map();',
     grab(/function titleKey\([^\n]*/),grab(/function uiTitles\([\s\S]*?\n}\n/),grab(/function localTitle\([^\n]*/),grab(/function localGroup\([^\n]*/)].join('\n'),c);
   return {c,calls};
 }
@@ -453,7 +454,10 @@ test('only Play all / Sync start playback; Pause all clears every intent',async(
 test('static: no autoplay, no play() outside startTogether and the intent-gated safety net',()=>{
   assert.match(script,/video\.autoplay = false/);
   const plays=[...script.matchAll(/\.play\(\)/g)].length;
-  assert.equal(plays,3,'startTogether, autoResume, and the verse loop restarting a tile that was already playing');
+  assert.equal(plays,4,'startTogether, autoResume, the verse loop restart, and the quality-swap resume');
+  const rs=grab(/function resumeAfterSwap\(entry\) \{[\s\S]*?\n}/);
+  assert.match(rs,/if \(!userPaused\) entry\.video\.play\(\)/,'a playing tile keeps playing after a swap; Pause all still wins');
+  assert.doesNotMatch(rs,/shouldPlay/,'app intent is not consulted: the element state rules');
   assert.match(grab(/function onVerseEnded[\s\S]*?\n}\n/),/!x\.shouldPlay/,'the third play() is only the verse-loop restart, gated on shouldPlay');
   assert.match(grab(/function autoResume\(\) \{[\s\S]*?\n}/),/x\.shouldPlay && x\.video\.src/);
   assert.match(script,/video\.addEventListener\('loadeddata', loaded\)/,'a loaded paused tile does not stay on "Loading…"');
@@ -468,7 +472,7 @@ test('Remove all: stops a running Add-all loop and a restore, and a late list lo
   const removed=[];
   const c=vm.createContext({tiles:new Map(),clearTimeout,Promise,setTimeout,Array,
     updateRetryUI(){},updateCounter(){},saveState(){},refreshGlobalPicker(){},renderAddList(){},cancelSync(){c.cancelled=true},cancelled:false});
-  vm.runInContext('let mosaicGen = 0; let stopAddingAll = false; let audible = {};'+grab(/function cancelRetry\([^\n]*\n/)+grab(/function removeAllTiles\(\) \{[\s\S]*?\n}\n/),c);
+  vm.runInContext('let mosaicGen = 0; let stopAddingAll = false; let audible = {}; let mainCode = "L1"; const grid = {classList:{remove(){}}};'+grab(/function cancelRetry\([^\n]*\n/)+grab(/function removeAllTiles\(\) \{[\s\S]*?\n}\n/),c);
   const vids=[mk(),mk(),mk()];
   vids.forEach((v,i)=>c.tiles.set('L'+i,{video:v,tile:{remove(){removed.push(i)}}}));
   vm.runInContext('removeAllTiles()',c);
@@ -533,7 +537,7 @@ test('Pause all: after it nothing replays by itself, including tiles added later
 // ---- Bible passage (book, chapter, verse) ----
 function bibleCtx(extra){
   const c=vm.createContext(Object.assign({Map,Number,Math,String,Array,Object,Promise,JSON,encodeURIComponent,setTimeout,clearTimeout,LANG:'es'},extra||{}));
-  vm.runInContext([grab(/const PUBMEDIA[^\n]*/),grab(/const BIBLE_NAMES[^\n]*/),grab(/const BIBLE_CHAPTERS[^\n]*/),grab(/let BIBLE_TIMEOUT[^\n]*/),grab(/function bibleKey\([^\n]*/),grab(/function parseBibleKey\([\s\S]*?\n}\n/),grab(/function bibleLabel\([^\n]*/),grab(/function timeToSec\([^\n]*/),'const bibleCache = new Map();',grab(/function fetchBibleChapter\([\s\S]*?\n}\n/)].join('\n'),c);
+  vm.runInContext([grab(/const PUBMEDIA[^\n]*/),grab(/const BIBLE_NAMES[^\n]*/),grab(/const BIBLE_CHAPTERS[^\n]*/),grab(/let BIBLE_TIMEOUT[^\n]*/),grab(/function bibleKey\([^\n]*/),grab(/function parseBibleKey\([\s\S]*?\n}\n/),grab(/function bibleLabel\([^\n]*/),grab(/function timeToSec\([^\n]*/),'const bibleCache = new Map();',grab(/function fetchBibleChapter\([\s\S]*?\n}\n/),grab(/function pickRes\([\s\S]*?\n}/),'let qualityPref = 240;'].join('\n'),c);
   return c;
 }
 test('Bible data: 66 books, 1189 chapters, names in ES and EN, strict keys',()=>{
@@ -616,7 +620,8 @@ test('Bible wiring: collection, global selects, apply, share link, per-tile seek
   assert.match(script,/\['BIBLE', t\('bibleColl'\)\]/);
   assert.match(script,/if \(entry\.coll === 'BIBLE'\) return fillBible\(entry, keepProg, listOnly\)/);
   assert.match(script,/if \(isBible\) \{ x\.coll = coll; x\.prog = ''; x\.want = ''; x\.shouldPlay = false; await fillBible\(x, nk\); return; \}/);
-  assert.match(script,/loadedmetadata', \(\) => \{ if \(entry\.startAt > 0/);
+  assert.match(script,/loadedmetadata', \(\) => \{[^\n]*\n\s*if \(entry\.swapPos != null\)/);
+  assert.match(script,/else if \(entry\.startAt > 0 && Number\.isFinite\(video\.duration\)/);
   assert.match(script,/const targetOf = s =>/);
   const c=vm.createContext({URLSearchParams,Number,Math,String,Array});
   vm.runInContext([grab(/function validLanguageCode\([\s\S]*?\n}/),grab(/function buildShareHash\([\s\S]*?\n}/),grab(/function parseShareHash\([\s\S]*?\n}/)].join('\n'),c);
@@ -767,7 +772,7 @@ test('verse loop wiring: events call the handlers, chosen verse sets loop, a new
 // --- Publications (books and brochures) ---
 function pubCtx(extra){
   const c=vm.createContext(Object.assign({Map,Number,Math,String,Array,Object,Promise,JSON,encodeURIComponent,setTimeout,clearTimeout,RegExp,LANG:'es'},extra||{}));
-  vm.runInContext([grab(/const PUB_MEDIA_URL[^\n]*/),grab(/let BIBLE_TIMEOUT[^\n]*/),grab(/const PUBS = \[[\s\S]*?\n\];/),grab(/const PUB_BY[^\n]*/),grab(/function pubKey\([^\n]*/),grab(/function parsePubKey\([\s\S]*?\n}\n/),grab(/function pubName\([^\n]*/),grab(/function pubLabel\([^\n]*/),'const pubCache = new Map();',grab(/function fetchPubMedia\([\s\S]*?\n}\n/),grab(/async function pubTrackTitles\([\s\S]*?\n}\n/)].join('\n'),c);
+  vm.runInContext([grab(/const PUB_MEDIA_URL[^\n]*/),grab(/let BIBLE_TIMEOUT[^\n]*/),grab(/const PUBS = \[[\s\S]*?\n\];/),grab(/const PUB_BY[^\n]*/),grab(/function pubKey\([^\n]*/),grab(/function parsePubKey\([\s\S]*?\n}\n/),grab(/function pubName\([^\n]*/),grab(/function pubLabel\([^\n]*/),'const pubCache = new Map();',grab(/function fetchPubMedia\([\s\S]*?\n}\n/),grab(/async function pubTrackTitles\([\s\S]*?\n}\n/),grab(/function pickRes\([\s\S]*?\n}/),'let qualityPref = 240;'].join('\n'),c);
   return c;
 }
 test('Publications: fixed list is well formed and keys are strictly validated',()=>{
@@ -927,4 +932,313 @@ test('Publication tile: without an interface-language title the label is neutral
   assert.equal(w.log[0][0],'load');assert.equal(w.log[0][4],'Hacer discípulos: una obra de amor (videos) - #3');
   assert.doesNotMatch(w.log[0][4],/예수/);
   assert.doesNotMatch(grab(/async function fillPub\([\s\S]*?\n}\n/),/tr\.title/,'the tile\'s own title is never used for labels');
+});
+
+// ================= v1.3.0: quality picker, full share link, shortcuts, metadata cache, featured tile, PiP =================
+test('pickRes: highest at or below the preference, lowest when all are above, junk ignored',()=>{
+  const c=vm.createContext({Array,Number,RegExp});
+  vm.runInContext(grab(/function pickRes\([\s\S]*?\n}/),c);
+  const opts=[{url:'https://cdn/a_r240P.mp4',res:240},{url:'https://cdn/a_r480P.mp4',res:480},{url:'https://cdn/a_r720P.mp4',res:720}];
+  assert.equal(c.pickRes(opts,240),'https://cdn/a_r240P.mp4');
+  assert.equal(c.pickRes(opts,480),'https://cdn/a_r480P.mp4');
+  assert.equal(c.pickRes(opts,720),'https://cdn/a_r720P.mp4');
+  assert.equal(c.pickRes([{url:'https://cdn/a_r480P.mp4',res:480}],240),'https://cdn/a_r480P.mp4','all above: the lowest, never nothing');
+  assert.equal(c.pickRes([],720),'');
+  assert.equal(c.pickRes(null,240),'');
+  assert.equal(c.pickRes([{url:'http://insecure/x.mp4',res:240},{url:'https://cdn/a_r360P.mp4',res:360}],240),'https://cdn/a_r360P.mp4','non-https ignored');
+});
+test('pickFile: 240p by default, the chosen quality when set, null without files',()=>{
+  const c=vm.createContext({Array,Number,RegExp});
+  vm.runInContext(grab(/function pickRes\([\s\S]*?\n}/)+grab(/function fileOptions\([\s\S]*?\n}/)+'let qualityPref=240;'+grab(/function pickFile\([\s\S]*?\n}/),c);
+  const media={files:[{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/a_r240P.mp4'},{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/a_r480P.mp4'},{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/a_r720P.mp4'}]};
+  assert.equal(c.pickFile(media),'https://cdn/a_r240P.mp4','default stays the data-saving rendition');
+  vm.runInContext('qualityPref=720;',c);
+  assert.equal(c.pickFile(media),'https://cdn/a_r720P.mp4');
+  assert.equal(c.pickFile({files:[]}),null);
+});
+test('fetchBibleChapter keeps every resolution for the quality picker; src stays the smallest',async()=>{
+  const body={files:{ASL:{MP4:[
+    {track:3,file:{url:'https://cdn/x_ASL_03_r720P.mp4'},duration:582,markers:null},
+    {track:3,file:{url:'https://cdn/x_ASL_03_r240P.mp4'},duration:582,markers:null}]}}};
+  const c=bibleCtx({fetchJSON:async()=>body});
+  const r=await vm.runInContext("fetchBibleChapter('ASL',43,3)",c);
+  assert.match(r.src,/r240P/);assert.deepEqual(JSON.parse(JSON.stringify(r.options.map(o=>o.res))),[240,720]);
+});
+test('fetchPubMedia keeps every resolution per track; src stays the smallest',async()=>{
+  const files=[pubFile(0,720),pubFile(0,480),pubFile(0,240)];
+  const c=pubCtx({fetchJSON:async()=>({files:{DGS:{MP4:files}}})});
+  const r=await vm.runInContext("fetchPubMedia('DGS','jy')",c);
+  const tr=[...r.tracks.values()][0];
+  assert.match(tr.src,/r240P/);assert.deepEqual(JSON.parse(JSON.stringify(tr.options.map(o=>o.res))),[240,480,720]);
+});
+test('Bible tile: the quality preference picks the rendition when options exist',async()=>{
+  const ok={state:'ok',src:'https://cdn/a_r240P.mp4',options:[{url:'https://cdn/a_r240P.mp4',res:240},{url:'https://cdn/a_r720P.mp4',res:720}],verses:new Map([[16,197.6]])};
+  const w=fillWorld(ok);vm.runInContext('qualityPref=720;',w.c);
+  await vm.runInContext('fillBible',w.c)(w.entry,'bible_43_3_16');
+  assert.deepEqual(w.log,[['load','bible_43_3_16',197.6,false,'https://cdn/a_r720P.mp4']]);
+});
+
+// --- share link with the full mosaic state ---
+test('share hash: per-tile publications ride along and survive a round trip',()=>{
+  const c=vm.createContext({URLSearchParams,Number,Math,String,Array});
+  vm.runInContext([grab(/function validLanguageCode\([\s\S]*?\n}/),grab(/function buildShareHash\([\s\S]*?\n}/),grab(/function parseShareHash\([\s\S]*?\n}/)].join('\n'),c);
+  const h=vm.runInContext("buildShareHash(['LSE','ASL'],'VODStudio','pub-a_LSE_1_VIDEO',[{code:'ASL',coll:'BIBLE',prog:'bible_43_3_16'}])",c);
+  assert.equal(h,'l=LSE,ASL&c=VODStudio&p=pub-a_LSE_1_VIDEO&t=ASL:BIBLE:bible_43_3_16');
+  const r=JSON.parse(JSON.stringify(vm.runInContext('parseShareHash(\'#\' + '+JSON.stringify(h)+', [\'VODStudio\',\'BIBLE\'])',c)));
+  assert.deepEqual(r,{langs:[{code:'LSE',coll:'VODStudio',prog:'pub-a_LSE_1_VIDEO'},{code:'ASL',coll:'BIBLE',prog:'bible_43_3_16'}]});
+});
+test('share hash: per-tile overrides are validated one by one',()=>{
+  const c=vm.createContext({URLSearchParams,Number,Math,String,Array});
+  vm.runInContext([grab(/function validLanguageCode\([\s\S]*?\n}/),grab(/function buildShareHash\([\s\S]*?\n}/),grab(/function parseShareHash\([\s\S]*?\n}/)].join('\n'),c);
+  const P=(h)=>JSON.parse(JSON.stringify(vm.runInContext('parseShareHash('+JSON.stringify(h)+', [\'VODStudio\',\'BIBLE\'])',c)));
+  const bad=P('#l=LSE,ASL&c=VODStudio&p=x&t=XX:BIBLE:bible_1_1,ASL:NOPE:bible_1_1,ASL:BIBLE:bad key,LSE:BIBLE:bible_1_2_3');
+  assert.deepEqual(bad,{langs:[{code:'LSE',coll:'BIBLE',prog:'bible_1_2_3'},{code:'ASL',coll:'VODStudio',prog:'x'}]},'unknown code, unknown collection and bad publication dropped');
+  const noc=P('#l=LSE,ASL&c=VODStudio&p=x&t=ASL:BIBLE:');
+  assert.deepEqual(noc,{langs:[{code:'LSE',coll:'VODStudio',prog:'x'},{code:'ASL',coll:'BIBLE'}]},'a per-tile collection without a program stays collection-only');
+  const old=P('#l=LSE,ASL&c=VODStudio&p=x'); // links from before per-tile state still work
+  assert.deepEqual(old,{langs:[{code:'LSE',coll:'VODStudio',prog:'x'},{code:'ASL',coll:'VODStudio',prog:'x'}]});
+});
+test('share button computes per-tile overrides from the live tiles',()=>{
+  const h=grab(/getElementById\('shareBtn'\)\.addEventListener\('click'[\s\S]*?\n\}\);/);
+  assert.match(h,/x\.coll !== ref\.coll \|\| \(x\.prog \|\| x\.want \|\| ''\) !== refProg/);
+  assert.match(h,/buildShareHash\(list\.map\(x => x\.code\), ref\.coll, ref\.prog, perTile\)/);
+});
+
+// --- metadata cache ---
+function metaCtx(store){
+  const c=vm.createContext({JSON,Date,Number,Object,Array,String,localStorage:store||{getItem:()=>null,setItem(){}}});
+  vm.runInContext([grab(/function readStored\([\s\S]*?\n}/),grab(/function writeStored\([\s\S]*?\n}/),grab(/const META_KEY[^\n]*/),grab(/const META_LIMIT[^\n]*/),grab(/function metaEntries\([\s\S]*?\n}/),grab(/function metaRead\([\s\S]*?\n}/),grab(/function metaWrite\([\s\S]*?\n}/)].join('\n'),c);
+  return c;
+}
+test('metadata cache: round trip, age limit, oversized entry never stored, oldest pruned first, storage failure tolerated',()=>{
+  const store=new Map();
+  const c=metaCtx({getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)});
+  vm.runInContext("metaWrite('a',{x:1});metaWrite('b',{y:2});",c);
+  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext("metaRead('a').data",c))),{x:1});
+  assert.ok(vm.runInContext("metaRead('a',3600000)",c),'fresh enough');
+  vm.runInContext("const e=metaEntries();e['a'].ts=Date.now()-10000;localStorage.setItem(META_KEY,JSON.stringify({v:1,entries:e}));",c);
+  assert.equal(vm.runInContext("metaRead('a',5000)",c),null,'older than the limit');
+  assert.ok(vm.runInContext("metaRead('a',20000)",c),'inside the limit');
+  vm.runInContext("metaWrite('big','x'.repeat(400*1024));",c);
+  assert.equal(vm.runInContext("metaRead('big')",c),null,'an oversized entry is never stored');
+  assert.equal(vm.runInContext("metaRead('a')",c),null,'oldest pruned first');
+  const dead=metaCtx({getItem:()=>null,setItem(){throw new Error('QuotaExceededError')}});
+  assert.equal(vm.runInContext("metaWrite('a',1)",dead),false);
+  assert.equal(vm.runInContext("metaRead('a')",dead),null);
+  const junk=metaCtx({getItem:()=>'{bad',setItem(){}});
+  assert.equal(vm.runInContext("metaRead('a')",junk),null,'corrupt cache is ignored');
+});
+test('catalogue: a saved copy is used when the API fails, with its date shown; live data replaces it',async()=>{
+  const note={textContent:''};
+  const grabCat=()=>[grab(/function validLanguageCode\([\s\S]*?\n}/),'const API="A";let ALL_SIGN_LANGS=[];',grab(/function fmtDate\([\s\S]*?\n}/),grab(/function sanitizeCatalog\([\s\S]*?\n}/),grab(/function loadCatalog\([\s\S]*?\n}\n/)].join('\n');const flush=()=>new Promise(r=>setTimeout(r,20));
+  const c=vm.createContext({Array,Object,Set,JSON,Date,Number,Promise,document:{getElementById:()=>note},renderAddList(){},t:k=>k==='catalogCached'?(d=>'cached '+d):k,
+    fetchJSON:async()=>{throw new Error('HTTP 500')},
+    metaRead:()=>({ts:1730000000000,data:[{code:'LSE',name:'Lengua de Signos Espanola'},{code:'../x',name:'bad'},{code:'ASL',name:'American Sign Language'}]}),
+    metaWrite(){throw new Error('must not be called on failure')}});
+  vm.runInContext(grabCat(),c);
+  await vm.runInContext('loadCatalog()',c); // resolves at once: the saved copy is already applied
+  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('ALL_SIGN_LANGS.map(l=>l.code)',c))),['LSE','ASL'],'saved catalogue validated');
+  await flush(); // the background refresh has run by now
+  assert.match(note.textContent,/^cached /,'the date of the saved copy is shown');
+  const c2=vm.createContext({Array,Object,Set,JSON,Date,Number,Promise,document:{getElementById:()=>note},renderAddList(){},t:k=>k,
+    fetchJSON:async()=>({languages:[{code:'BSL',name:'British Sign Language',isSignLanguage:true},{code:'EN',name:'English',isSignLanguage:false}]}),
+    metaRead:()=>({ts:1,data:[{code:'LSE',name:'x'}]}),metaWrite(){c2.wrote=true}});
+  vm.runInContext(grabCat(),c2);
+  note.textContent='';
+  await vm.runInContext('loadCatalog()',c2);
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('ALL_SIGN_LANGS.map(l=>l.code)',c2))),['BSL'],'live data wins');
+  assert.equal(note.textContent,'');assert.ok(c2.wrote,'the fresh catalogue is saved');
+  const c3=vm.createContext({Array,Object,Set,JSON,Date,Number,Promise,document:{getElementById:()=>note},renderAddList(){},t:k=>k,fetchJSON:async()=>{throw new Error('x')},metaRead:()=>null,metaWrite(){}});
+  vm.runInContext(grabCat(),c3);
+  await vm.runInContext('loadCatalog()',c3);
+  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('ALL_SIGN_LANGS',c3))),[],'no cache and a failed API: empty, as before');
+});
+test('fetchCollection: a saved listing fills the selector when the API is down, flagged with its date',async()=>{
+  const saved=[{naturalKey:'k1',title:'T1',group:'g',agnostic:'a1',files:[{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/k1_r240P.mp4'},{mimetype:'video/mp4',progressiveDownloadURL:'http://insecure/x.mp4'}]}];
+  const parts=()=>[grab(/function slimItem\([\s\S]*?\n}/),grab(/function reviveItem\([\s\S]*?\n}/),grab(/function cachedListing\([\s\S]*?\n}/),grab(/async function fetchCollection\([\s\S]*?\n}\n/),grab(/function reviveItem\([\s\S]*?\n}/),grab(/function cachedListing\([\s\S]*?\n}/)].join('\n');
+  const c=vm.createContext({API:'A',Array,Promise,JSON,Date,Number,Object,
+    fetchJSON:async()=>{throw new Error('HTTP 500')},
+    metaRead:k=>k==='coll:LSE:X'?{ts:1730000000000,data:saved}:null,metaWrite(){}});
+  vm.runInContext(parts(),c);
+  const r=await c.fetchCollection('LSE','X');
+  assert.ok(!r.failed,'the saved listing covers the outage');assert.equal(r.cachedTs,1730000000000);
+  assert.equal(r[0].naturalKey,'k1');assert.equal(r[0].media.files.length,1,'non-https files dropped on revive');
+  assert.equal(r[0].media.files[0].progressiveDownloadURL,'https://cdn/k1_r240P.mp4');
+  const c2=vm.createContext({API:'A',Array,Promise,JSON,Date,Number,Object,fetchJSON:async()=>{throw new Error('HTTP 500')},metaRead:()=>null,metaWrite(){}});
+  vm.runInContext(parts(),c2);
+  const r2=await c2.fetchCollection('LSE','X');assert.equal(r2.failed,true,'without a saved copy the failure is reported as before');
+  let wrote=null;
+  const c3=vm.createContext({API:'A',Array,Promise,JSON,Date,Number,Object,
+    fetchJSON:async()=>({category:{media:[{type:'video',naturalKey:'n1',title:'T',languageAgnosticNaturalKey:'a',files:[{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/n1_r240P.mp4'}]}]}}),
+    metaRead:()=>null,metaWrite:(k,v)=>{wrote={k,v}}});
+  vm.runInContext(parts(),c3);
+  await c3.fetchCollection('LSE','Y');
+  assert.equal(wrote.k,'coll:LSE:Y');assert.equal(wrote.v[0].files[0].progressiveDownloadURL,'https://cdn/n1_r240P.mp4');assert.ok(!('media' in wrote.v[0]),'slim entry, no full media object');
+});
+
+// --- quality selector ---
+test('quality selector: element, options, persistence and live swap are wired',()=>{
+  assert.ok(html.includes('id="quality"'));
+  assert.match(script,/qualitySel\.addEventListener\('change'/);
+  assert.match(script,/qualityPref = parseQuality\(readStored\(QUALITY_KEY\)\)/);
+  assert.match(script,/writeStored\(QUALITY_KEY, String\(qualityPref\)\)/);
+  const aq=grab(/function applyQuality\(\) \{[\s\S]*?\n}/);
+  assert.match(aq,/if \(pending == null\) x\.resumeAfterSwap = !x\.video\.paused && !x\.video\.ended/,'real element state, captured once per swap chain');
+  assert.match(aq,/x\.swapPos = pending != null \? pending/,'a pending position survives rapid swaps');
+  assert.match(aq,/x\.loopSrc = url/,'verse loops follow the new resolution');
+  assert.match(aq,/cancelRetry\(x\)/,'a pending retry belongs to the old resolution');
+  assert.match(grab(/async function loadTileProgram\([\s\S]*?\n}\n/),/entry\.swapPos = null; entry\.resumeAfterSwap = false/,'a stale swap callback never moves a new program');
+  const fj=grab(/async function fetchJSON\([\s\S]*?\n}/);
+  assert.match(fj,/AbortController/);assert.match(fj,/setTimeout\(\(\) => ctrl\.abort\(\), timeoutMs\)/);assert.match(fj,/clearTimeout\(timer\)/,'network calls are bounded');
+  const fp=grab(/async function fillPrograms\([\s\S]*?\n}\n/);
+  assert.match(fp,/cachedListing\(code, entry\.coll\)/,'tile selector shows the saved listing while the network answers');
+  assert.match(script,/cachedListing\(first\.code, gc\.value\)/,'global picker shows the saved listing while the network answers');
+});
+test('applyQuality keeps position and real playback state; rapid swaps keep the pending position',()=>{
+  const c=vm.createContext({Number,cancelRetry(){},tiles:new Map()});
+  vm.runInContext([grab(/function pickRes\([\s\S]*?\n}/),'let qualityPref=480;',grab(/function applyQuality\(\) \{[\s\S]*?\n}/)].join('\n'),c);
+  const mk=(src,paused)=>{let u=src;const e={fileOptions:[{url:'https://cdn/a_r240P.mp4',res:240},{url:'https://cdn/a_r480P.mp4',res:480},{url:'https://cdn/a_r720P.mp4',res:720}],shouldPlay:false,tile:{classList:{contains:()=>false}},armWatchdog(){},loopSrc:src,video:{paused,ended:false,currentTime:123,get src(){return u},set src(v){u=v;this.currentTime=0;this.paused=true},load(){this.loads=(this.loads||0)+1}}};return e;};
+  const a=mk('https://cdn/a_r240P.mp4',false);c.tiles=new Map([['A',a]]); // started from its own native controls: shouldPlay stays false
+  vm.runInContext('applyQuality()',c);
+  assert.equal(a.video.src,'https://cdn/a_r480P.mp4');assert.equal(a.swapPos,123);assert.equal(a.resumeAfterSwap,true,'native playing keeps playing');assert.equal(a.video.loads,1);
+  const b=mk('https://cdn/a_r240P.mp4',true);b.shouldPlay=true;c.tiles=new Map([['B',b]]); // paused from its native controls after Play all
+  vm.runInContext('applyQuality()',c);
+  assert.equal(b.resumeAfterSwap,false,'native pause stays paused even with shouldPlay true');assert.equal(b.swapPos,123);
+  const d=mk('https://cdn/a_r240P.mp4',false);c.tiles=new Map([['D',d]]);
+  vm.runInContext('applyQuality()',c);assert.equal(d.swapPos,123);
+  vm.runInContext('qualityPref=720;',c);vm.runInContext('applyQuality()',c); // second swap before the first loaded: src reset currentTime to 0
+  assert.equal(d.swapPos,123,'position survives rapid swaps');assert.equal(d.video.src,'https://cdn/a_r720P.mp4');assert.equal(d.resumeAfterSwap,true,'playback intent captured by the first swap survives');
+  const e=mk('https://cdn/a_r720P.mp4',false);c.tiles=new Map([['E',e]]);
+  vm.runInContext('applyQuality()',c);assert.equal(e.video.loads||0,0,'already at the preferred resolution: untouched');
+});
+
+// --- keyboard shortcuts ---
+test('keyboard shortcuts: K/Space toggles play, S syncs, J/L and arrows skip; fields and buttons keep their keys',()=>{
+  const h=grab(/document\.addEventListener\('keydown', \(e\) => \{ \/\/ mosaic shortcuts[\s\S]*?\n\}\);/);
+  assert.match(h,/e\.ctrlKey \|\| e\.metaKey \|\| e\.altKey/);
+  assert.match(h,/tag === 'INPUT' \|\| tag === 'SELECT' \|\| tag === 'TEXTAREA'/);
+  assert.match(h,/tag === 'BUTTON' && \(e\.key === ' ' \|\| e\.key === 'Enter'\)/);
+  assert.match(h,/k === ' ' \|\| k === 'k'\) \{ e\.preventDefault\(\); togglePlayAll\(\); \}/);
+  assert.match(h,/k === 's'\) \{ e\.preventDefault\(\); startTogether\(\); \}/);
+  assert.match(h,/k === 'j' \|\| e\.key === 'ArrowLeft'\) \{ e\.preventDefault\(\); skipAll\(-10\); \}/);
+  assert.match(h,/k === 'l' \|\| e\.key === 'ArrowRight'\) \{ e\.preventDefault\(\); skipAll\(10\); \}/);
+  assert.match(html,/id="playAll" title="K" aria-keyshortcuts="k"/);
+  assert.match(html,/id="syncAll" title="S" aria-keyshortcuts="s"/);
+  assert.match(html,/id="back10" title="J \/ ←" aria-keyshortcuts="j arrowleft"/);
+});
+test('togglePlayAll pauses when anything plays, otherwise starts together',async()=>{
+  const vs=[new FV(),new FV()];const w=syncWorld(vs);
+  vm.runInContext([grab(/function anyPlaying\(\) \{[^\n]*/),grab(/function togglePlayAll\(\) \{[\s\S]*?\n}/)].join('\n'),w.c);
+  vm.runInContext('togglePlayAll()',w.c);
+  await new Promise(r=>setTimeout(r,600)); // startTogether is fire-and-forget inside togglePlayAll; mock timeouts are 80ms
+  assert.deepEqual(vs.map(v=>v.played),[1,1],'nothing played: starts together');
+  vm.runInContext('togglePlayAll()',w.c);
+  assert.ok(vs.every(v=>v.paused));assert.equal(vm.runInContext('userPaused',w.c),true,'playing: pauses like Pause all');
+});
+
+// --- featured (main) tile ---
+test('featured tile: star button in the template, layout class, persistence, removal clears it',()=>{
+  const tpl=script.match(/tile\.innerHTML = `([\s\S]*?)`;/)[1];
+  assert.match(tpl,/<button class="main" title="\$\{t\('mainTip'\)\}" aria-label="\$\{t\('mainTip'\)\}" aria-pressed="false">/);
+  assert.match(html,/#grid\.featured \.tile\.main \{ grid-column:1 \/ -1; \}/);
+  const sm=grab(/function setMainTile\(code\) \{[\s\S]*?\n}/);
+  assert.match(sm,/grid\.classList\.toggle\('featured', !!mainCode\)/);
+  assert.match(sm,/x\.tile\.classList\.toggle\('main', on\)/);
+  assert.match(sm,/sortTiles\(\)/,'featuring reorders: the featured tile leads, the rest stay reachable');
+  assert.match(grab(/function sortTiles\(\) \{[\s\S]*?\n}/),/order\.findIndex\(x => x\.code === mainCode\)/,'the featured tile stays on top whatever its load state');
+  assert.doesNotMatch(sm,/video\.(load|pause|play)|currentTime/,'featuring is layout only: playback and position are untouched');
+  assert.match(grab(/function saveState\([\s\S]*?\n}/),/main: mainCode/);
+  assert.match(script,/if \(mainCode === lang\.code\) setMainTile\(''\)/,'removing the featured tile clears the layout');
+  assert.match(script,/if \(!shared && state\.main && validLanguageCode\(state\.main\)\) setMainTile\(state\.main\)/,'restored after the tiles');
+});
+test('setMainTile moves the featured tile to the top; the rest stay reachable and unfeaturing restores the order',()=>{
+  const mk=code=>{const cls=new Set();return {code,status:{style:{display:'none'},classList:{contains:()=>false}},statusKey:'',tile:{classList:{toggle:(c,f)=>{f?cls.add(c):cls.delete(c)},contains:c=>cls.has(c)}},mainBtn:{classList:{toggle(){}},setAttribute(){},title:''}};};
+  const a=mk('A'),b=mk('B'),d=mk('C');const gcl=new Set();const nodes=[a.tile,b.tile,d.tile];
+  const grid={get children(){return nodes;},classList:{toggle:(x,f)=>{f?gcl.add(x):gcl.delete(x)}},appendChild(n){nodes.splice(nodes.indexOf(n),1);nodes.push(n);}};
+  const c=vm.createContext({String,t:k=>k,grid,tiles:new Map([['A',a],['B',b],['C',d]]),saveState(){}});
+  vm.runInContext('let mainCode = "";'+grab(/function tileGroup\(x\) \{[\s\S]*?\n}/)+grab(/function sortTiles\(\) \{[\s\S]*?\n}/)+grab(/function setMainTile\(code\) \{[\s\S]*?\n}/),c);
+  const order=()=>nodes.map(n=>[a,b,d].find(e=>e.tile===n).code).join('');
+  assert.equal(order(),'ABC');
+  vm.runInContext("setMainTile('C')",c); // not the first tile: the featured one leads
+  assert.equal(order(),'CAB');assert.ok(d.tile.classList.contains('main'));assert.ok(!a.tile.classList.contains('main'));assert.ok(gcl.has('featured'));
+  vm.runInContext("setMainTile('A')",c); // switching moves the new featured tile up; the rest return to their added order
+  assert.equal(order(),'ABC');assert.ok(a.tile.classList.contains('main'));assert.ok(!d.tile.classList.contains('main'));
+  vm.runInContext("setMainTile('A')",c); // the same code again keeps it (the toggle lives in the button handler)
+  assert.equal(order(),'ABC');
+  vm.runInContext("setMainTile('')",c); // unfeaturing restores the sorted order
+  assert.equal(order(),'ABC');assert.ok(!gcl.has('featured'));
+  vm.runInContext("setMainTile('ZZ')",c);assert.equal(order(),'ABC');assert.ok(!gcl.has('featured'),'an unknown code clears');
+});
+
+test('cachedListing revives a saved listing with its date; absent or expired returns null',()=>{
+  const saved=[{naturalKey:'k1',title:'T1',group:'g',agnostic:'a1',files:[{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/k1_r240P.mp4'}]}];
+  const c=vm.createContext({Array,JSON,Date,Number,Object,metaRead:(k)=>k==='coll:LSE:X'?{ts:1000,data:saved}:null});
+  vm.runInContext([grab(/function reviveItem\([\s\S]*?\n}/),grab(/function cachedListing\([\s\S]*?\n}/)].join('\n'),c);
+  const r=c.cachedListing('LSE','X');
+  assert.equal(r.cachedTs,1000);assert.equal(r[0].media.files[0].progressiveDownloadURL,'https://cdn/k1_r240P.mp4');
+  assert.equal(c.cachedListing('LSE','NOPE'),null);
+});
+
+// --- picture in picture ---
+test('picture in picture: per-tile button, only when the browser supports it',()=>{
+  const tpl=script.match(/tile\.innerHTML = `([\s\S]*?)`;/)[1];
+  assert.match(tpl,/<button class="pip" title="\$\{t\('pipTip'\)\}" aria-label="\$\{t\('pipTip'\)\}" hidden>/,'hidden until support is known');
+  assert.match(script,/if \('pictureInPictureEnabled' in document && document\.pictureInPictureEnabled\)/);
+  assert.match(script,/video\.requestPictureInPicture\(\)\.catch\(\(\) => \{\}\)/);
+  assert.match(script,/document\.exitPictureInPicture\(\)\.catch\(\(\) => \{\}\)/);
+  assert.match(script,/video\.addEventListener\('enterpictureinpicture'/);
+  assert.match(script,/video\.addEventListener\('leavepictureinpicture'/);
+});
+
+// --- v1.3.0 i18n ---
+test('v1.3.0 keys exist in both languages',()=>{
+  for(const k of ['qualLbl','qualTip','q240','q480','q720','mainTip','unmainTip','pipTip','gridLbl','catalogCached','listCached'])
+    assert.ok(dictKeys('es').includes(k)&&dictKeys('en').includes(k),k);
+});
+
+// ================= review67 round 2 regressions =================
+test('quality swap sequences: old Pause all then native play resumes; Pause all after the swap cancels',()=>{
+  const c=vm.createContext({Number,Event,cancelRetry(){},tiles:new Map()});
+  vm.runInContext([grab(/function pickRes\([\s\S]*?\n}/),'let qualityPref=480;let userPaused=false;',grab(/function applyQuality\(\) \{[\s\S]*?\n}/),grab(/function resumeAfterSwap\(entry\) \{[\s\S]*?\n}/)].join('\n'),c);
+  const playLine=grab(/video\.addEventListener\('play'[^\n]*/);
+  const mkPlaying=()=>{const v=new FV({paused:false});v.load=()=>{};let u='https://cdn/a_r240P.mp4';Object.defineProperty(v,'src',{get:()=>u,set:x=>{u=x;v._t=0;v.paused=true}});return v;};
+  const mkEntry2=v=>({fileOptions:[{url:'https://cdn/a_r240P.mp4',res:240},{url:'https://cdn/a_r480P.mp4',res:480}],shouldPlay:false,tile:{classList:{contains:()=>false}},video:v,armWatchdog(){},loopSrc:'https://cdn/a_r240P.mp4'});
+  // Pause all long ago, then the user starts one tile from its native controls, then changes quality
+  const v1=mkPlaying(),e1=mkEntry2(v1);c.video=v1;c.tiles=new Map([['A',e1]]);
+  vm.runInContext(playLine,c);vm.runInContext('userPaused = true;',c);
+  v1.dispatchEvent(new Event('play')); // the native control's play fires the listener
+  assert.equal(vm.runInContext('userPaused',c),false,'a manual play supersedes an old Pause all');
+  vm.runInContext('applyQuality()',c);assert.equal(e1.resumeAfterSwap,true);
+  vm.runInContext('resumeAfterSwap(tiles.get("A"))',c);
+  assert.equal(v1.played,1,'the natively started tile keeps playing after the swap');
+  // Pause all AFTER the swap started still cancels the resume
+  const v2=mkPlaying(),e2=mkEntry2(v2);c.video=v2;c.tiles=new Map([['B',e2]]);
+  vm.runInContext(playLine,c);vm.runInContext('userPaused = false;',c);
+  vm.runInContext('applyQuality()',c);assert.equal(e2.resumeAfterSwap,true);
+  vm.runInContext('userPaused = true;',c);
+  vm.runInContext('resumeAfterSwap(tiles.get("B"))',c);
+  assert.equal(v2.played,0,'Pause all after the swap cancels the resume');
+});
+test('a selection from the cached listing loads while the API hangs and wins over the late refresh',async()=>{
+  let resolveLive;const live=new Promise(r=>{resolveLive=r});
+  const w=tileWorld(()=>live); // every API call hangs until released
+  w.c.metaRead=(k)=>k==='coll:LSE:VODStudio'?{ts:1000,data:[
+    {naturalKey:'cachedA',title:'Cached A',group:'',agnostic:'cachedA',files:[{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/cachedA_r240P.mp4'}]},
+    {naturalKey:'cachedB',title:'Cached B',group:'',agnostic:'cachedB',files:[{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/cachedB_r240P.mp4'}]}]}:null;
+  w.c.fmtDate=(ts)=>'date'+ts;
+  w.c.t=(k)=>k==='listCached'?(d=>'cached '+d):k;
+  const e=w.entry;e.prog='';e.coll='VODStudio';
+  const p=vm.runInContext('fillPrograms',w.c)(e,'',false,false,false);
+  await new Promise(r=>setTimeout(r,20));
+  assert.equal(e.items.length,2,'the saved listing is the working state, not just paint');
+  assert.equal(e.sel.children.length,2);assert.equal(e.cachedListTs,1000,'the saved copy date rides along');
+  const it=e.items.find(i=>i.naturalKey==='cachedB');
+  assert.ok(it,'the chosen cached publication exists in items');
+  await vm.runInContext('loadTileProgram',w.c)(e,it); // what the selector change does
+  assert.equal(e.prog,'cachedB');assert.equal(w.video.src,'https://cdn/cachedB_r240P.mp4');assert.ok(!e.tile.classList.contains('novideo'),'loads, never noVideoPub');
+  resolveLive({category:{media:[media('cachedA'),media('cachedB'),media('cachedC')]}});
+  await p; // the late refresh must not override the choice
+  assert.equal(e.prog,'cachedB');assert.equal(w.video.src,'https://cdn/cachedB_r240P.mp4','no reload over the user choice');
+  assert.equal(e.sel.children.length,3,'the live list still replaced the options');
 });
