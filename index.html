@@ -323,10 +323,14 @@ function tileGroup(x) { // 0 = loads fine, 1 = load error (retriable), 2 = no vi
   if (x.status && x.status.style.display !== 'none' && x.status.classList.contains('err') && x.statusKey !== 'slowMsg') return 1;
   return x.tile.classList.contains('novideo') ? 2 : 0;
 }
-function sortTiles() { // good tiles first, then load errors, then unavailable; stable inside each group, keeps playback
+function sortTiles() { // featured tile first, then good tiles, load errors, unavailable; stable inside each group, keeps playback
   const groups = [[], [], []];
   for (const x of tiles.values()) groups[tileGroup(x)].push(x);
-  const order = [].concat(...groups);
+  let order = [].concat(...groups);
+  if (mainCode) { // the featured tile leads whatever its load state
+    const fi = order.findIndex(x => x.code === mainCode);
+    if (fi > 0) order = [order[fi], ...order.slice(0, fi), ...order.slice(fi + 1)];
+  }
   if (grid.children) { // already in order: touch nothing, so nothing jumps
     const cur = [...grid.children];
     if (cur.length === order.length && order.every((x, i) => cur[i] === x.tile)) return;
@@ -386,10 +390,14 @@ function labelFor(code) {
   return l ? l.name + ' (' + l.code + ')' : code;
 }
 
-async function fetchJSON(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+async function fetchJSON(url, timeoutMs = 12000) { // bounded: a hung API must never freeze the page
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : 0;
+  try {
+    const r = await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally { if (timer) clearTimeout(timer); }
 }
 
 function slimItem(it) { // metadata cache: titles and file links only, never the videos themselves
@@ -403,6 +411,14 @@ function reviveItem(it) { // a saved listing is data, not truth: every entry is 
   return { naturalKey: it.naturalKey, title: it.title, group: typeof it.group === 'string' ? it.group : '', agnostic: typeof it.agnostic === 'string' ? it.agnostic : undefined, media: { files } };
 }
 // Returns [{naturalKey,title,group,media,agnostic}] flattening one subcategory level.
+function cachedListing(code, collKey, maxAge = 7 * 24 * 3600 * 1000) { // a saved listing (metadata only) can fill a selector at once; live data replaces it
+  try {
+    const cached = metaRead('coll:' + code + ':' + collKey, maxAge);
+    const items = cached && Array.isArray(cached.data) ? cached.data.map(reviveItem).filter(Boolean) : [];
+    if (items.length) { items.cachedTs = cached.ts; return items; }
+  } catch (e) {}
+  return null;
+}
 async function fetchCollection(code, collKey) {
   const out = [];
   const mkey = 'coll:' + code + ':' + collKey;
@@ -428,11 +444,8 @@ async function fetchCollection(code, collKey) {
     try { if (!out.partial && out.length) metaWrite(mkey, out.map(slimItem)); } catch (e) {} // best effort: a partial or empty list is not cached
   } catch (e) { out.failed = true; } // request failed: different from a catalogue that is genuinely empty
   if (out.failed) { // the live API failed: a recent saved listing (metadata only) still fills the selector
-    try {
-      const cached = metaRead(mkey, 7 * 24 * 3600 * 1000);
-      const items = cached && Array.isArray(cached.data) ? cached.data.map(reviveItem).filter(Boolean) : [];
-      if (items.length) { for (const it of items) out.push(it); delete out.failed; out.cachedTs = cached.ts; }
-    } catch (e) {}
+    const pre = cachedListing(code, collKey);
+    if (pre) { for (const it of pre) out.push(it); delete out.failed; out.cachedTs = pre.cachedTs; }
   }
   return out;
 }
@@ -694,6 +707,7 @@ function setMainTile(code) { // one large tile above the rest; only layout class
       x.mainBtn.setAttribute('aria-pressed', String(on));
     }
   }
+  sortTiles(); // featured tile to the top, unfeatured back into place; nodes move, playback continues
   saveState();
 }
 function applyQuality() { // swap loaded sources to the new preference, keeping position and playback intent
@@ -701,17 +715,20 @@ function applyQuality() { // swap loaded sources to the new preference, keeping 
     if (!x.fileOptions || !x.fileOptions.length || !x.video.src || x.tile.classList.contains('novideo')) continue;
     const url = pickRes(x.fileOptions, qualityPref);
     if (!url || url === x.video.src) continue;
-    x.swapPos = Number.isFinite(x.video.currentTime) ? x.video.currentTime : null;
-    x.resumeAfterSwap = !!x.shouldPlay;
+    // a swap still in flight left currentTime reset to 0: keep the position captured by the first swap
+    const pending = Number.isFinite(x.swapPos) ? x.swapPos : null;
+    x.swapPos = pending != null ? pending : (Number.isFinite(x.video.currentTime) ? x.video.currentTime : null);
+    // the element's real state wins over app intent: a tile started or paused from its own controls keeps doing exactly that
+    if (pending == null) x.resumeAfterSwap = !x.video.paused && !x.video.ended; // a pending swap already captured the intent; the reload paused the element
     cancelRetry(x); // a pending retry belongs to the old resolution
     x.video.src = url; x.loopSrc = url; x.video.load();
     if (x.armWatchdog) x.armWatchdog();
   }
 }
-function resumeAfterSwap(entry) { // a quality swap on a tile that Play all started keeps it playing; Pause all wins
+function resumeAfterSwap(entry) { // a quality swap keeps a playing tile playing, however it was started; Pause all still wins
   if (!entry.resumeAfterSwap) return;
   entry.resumeAfterSwap = false;
-  if (!userPaused && entry.shouldPlay) entry.video.play().catch(() => {});
+  if (!userPaused) entry.video.play().catch(() => {});
 }
 function setMasterVolume(v) {
   masterVol = clampVolume(v);
@@ -762,6 +779,7 @@ async function loadTileProgram(entry, item) {
   const { video, status, tile } = entry;
   if (tiles.get(entry.code) !== entry) return; // the tile was removed while its list was loading: never revive it
   cancelRetry(entry); // a pending automatic reload belongs to the old source
+  entry.swapPos = null; entry.resumeAfterSwap = false; // a quality-swap callback from the old program must never seek or resume the new one
   entry.prog = item ? item.naturalKey : '';
   entry.fileOptions = item ? (item.fileOptions || (item.media ? fileOptions(item.media) : null)) : null;
   entry.shouldPlay = false; // a new source always loads paused
@@ -990,6 +1008,12 @@ async function fillPrograms(entry, keepProg, strict, deferLoad, listOnly) {
   if (entry.coll === 'PUBS') return fillPub(entry, keepProg, listOnly);
   const { code, sel } = entry;
   const lang0 = LANG;
+  const pre0 = cachedListing(code, entry.coll); // the saved listing fills the selector at once; the live list replaces it below
+  if (pre0) {
+    entry.cachedListTs = pre0.cachedTs;
+    sel.innerHTML = '';
+    for (const it of pre0) { const o = document.createElement('option'); o.value = it.naturalKey; o.textContent = localTitle(it, null); sel.appendChild(o); }
+  }
   let [items, tm] = await Promise.all([fetchCollection(code, entry.coll), uiTitles(entry.coll)]);
   if (lang0 !== LANG) tm = await uiTitles(entry.coll); // the interface language changed while loading
   entry.cachedListTs = items.cachedTs || 0;
@@ -1174,8 +1198,12 @@ async function refreshGlobalPrograms(keepProg) {
   const first = [...tiles.values()][0];
   gp.innerHTML = '';
   if (!first || !gc.value) return;
-  const [items, tm] = await Promise.all([(first.coll === gc.value && first.items && first.items.length) ? first.items : fetchCollection(first.code, gc.value), uiTitles(gc.value)]);
+  const reuse = (first.coll === gc.value && first.items && first.items.length) ? first.items : null;
+  const pre0 = reuse ? null : cachedListing(first.code, gc.value); // the saved listing fills the list at once; the live list replaces it below
+  if (pre0) for (const it of pre0) { const o = document.createElement('option'); o.value = normKey(it); o.textContent = localTitle(it, null); gp.appendChild(o); }
+  const [items, tm] = await Promise.all([reuse || fetchCollection(first.code, gc.value), uiTitles(gc.value)]);
   if (req !== globProgReq) return; // stale response: the user changed the selection again
+  gp.innerHTML = ''; // drop the provisional saved listing before filling the live one
   for (const it of items) { const o = document.createElement('option'); o.value = normKey(it); o.textContent = localTitle(it, tm); gp.appendChild(o); }
   let idx = 0;
   if (keepProg) { const k = items.findIndex(it => normKey(it) === keepProg); if (k >= 0) idx = k; }
@@ -1301,20 +1329,23 @@ document.getElementById('globApply').addEventListener('click', async () => {
   await Promise.all(workers);
 });
 
-async function loadCatalog() {
+function loadCatalog() {
   const note = document.getElementById('catalogNote');
-  const cached = metaRead('catalog:E'); // a saved catalogue makes the panel usable while the API answers
+  const cached = metaRead('catalog:E'); // a saved catalogue is applied at once: the page never waits for the network when it has one
   if (cached) { ALL_SIGN_LANGS = sanitizeCatalog(cached.data); renderAddList(); }
-  try {
-    const d = await fetchJSON(`${API}/languages/E/all?clientType=www`);
-    ALL_SIGN_LANGS = (d.languages || []).filter(l => l.isSignLanguage).sort((a, b) => a.name.localeCompare(b.name));
-    metaWrite('catalog:E', ALL_SIGN_LANGS.map(l => ({ code: l.code, name: l.name, vernacular: l.vernacular || '' })));
-    note.textContent = '';
-  } catch (e) {
-    if (cached && ALL_SIGN_LANGS.length) note.textContent = t('catalogCached')(fmtDate(cached.ts)); // say how old the saved copy is
-    else ALL_SIGN_LANGS = [];
-  }
-  renderAddList();
+  const refresh = (async () => {
+    try {
+      const d = await fetchJSON(`${API}/languages/E/all?clientType=www`);
+      ALL_SIGN_LANGS = (d.languages || []).filter(l => l.isSignLanguage).sort((a, b) => a.name.localeCompare(b.name));
+      metaWrite('catalog:E', ALL_SIGN_LANGS.map(l => ({ code: l.code, name: l.name, vernacular: l.vernacular || '' })));
+      note.textContent = '';
+    } catch (e) {
+      if (cached && ALL_SIGN_LANGS.length) note.textContent = t('catalogCached')(fmtDate(cached.ts)); // say how old the saved copy is
+      else ALL_SIGN_LANGS = [];
+    }
+    renderAddList();
+  })();
+  return cached ? Promise.resolve() : refresh; // without a saved copy the first render waits for the API, bounded by the fetch timeout
 }
 function renderAddList() {
   const list = document.getElementById('addList');

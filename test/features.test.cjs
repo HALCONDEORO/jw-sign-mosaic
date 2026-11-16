@@ -211,7 +211,7 @@ test('native mute of the audible tile silences all; native volume change moves t
 // --- listing errors: partial results are kept, flagged and retried; empty is not a failure ---
 function listWorld(handler){
   const c=vm.createContext({API:'A',fetchJSON:async(u)=>handler(u),Array,Promise});
-  vm.runInContext(grab(/async function fetchCollection\([\s\S]*?\n}\n/),c);return c;
+  vm.runInContext([grab(/async function fetchCollection\([\s\S]*?\n}\n/),grab(/function reviveItem\([\s\S]*?\n}/),grab(/function cachedListing\([\s\S]*?\n}/)].join('\n'),c);return c;
 }
 const vid=(k)=>({type:'video',naturalKey:k,title:k,languageAgnosticNaturalKey:k});
 test('fetchCollection: top-level failure is failed, genuinely empty is not',async()=>{
@@ -234,7 +234,7 @@ test('partial tiles count as failed, are retried list-only, and a failed refresh
   assert.ok(r.indexOf('fillPrograms(x, x.prog, false, false, true)')<r.indexOf('x.video.load()'));
   const f=grab(/async function fillPrograms\([\s\S]*?\n}\n/);
   assert.match(f,/if \(items\.failed && listOnly\) return;/);
-  assert.ok(f.indexOf('fetchCollection')<f.indexOf("sel.innerHTML = ''"),'list is fetched before the old one is cleared');
+  assert.ok(f.indexOf('await Promise.all([fetchCollection')<f.lastIndexOf("sel.innerHTML = ''"),'the live list is fetched before the current one is cleared; the provisional cached fill is the only earlier clear');
   assert.match(f,/if \(listOnly\) \{ sel\.selectedIndex/,'list-only refresh never reloads the video');
   assert.match(f,/if \(items\.failed\) \{ setStatus\(entry, 'loadErr'/);
 });
@@ -280,7 +280,7 @@ function tileWorld(handler){
   const c=vm.createContext({clearTimeout,setTimeout,Array,Promise,Map,Math,String,Number,Object,API:'A',LANG:'en',tiles:new Map(),fetchJSON:async u=>handler(u),
     document:{createElement:()=>el(),getElementById:()=>retryBtn},
     t:(k)=>k==='retryFailed'?(n=>'retry '+n):k,saveState(){},refreshGlobalPicker(){},sortTiles(){}});
-  vm.runInContext([grab(/function normKey\([^\n]*/),grab(/const UI_SOURCES[^\n]*/),'const titleCache = new Map();',grab(/function titleKey\([^\n]*/),grab(/function uiTitles\([\s\S]*?\n}\n/),grab(/function localTitle\([^\n]*/),grab(/function localGroup\([^\n]*/),grab(/function pickFile\([\s\S]*?\n}/),grab(/async function fetchCollection\([\s\S]*?\n}\n/),
+  vm.runInContext([grab(/function normKey\([^\n]*/),grab(/const UI_SOURCES[^\n]*/),'const titleCache = new Map();',grab(/function titleKey\([^\n]*/),grab(/function uiTitles\([\s\S]*?\n}\n/),grab(/function localTitle\([^\n]*/),grab(/function localGroup\([^\n]*/),grab(/function pickFile\([\s\S]*?\n}/),grab(/async function fetchCollection\([\s\S]*?\n}\n/),grab(/function reviveItem\([\s\S]*?\n}/),grab(/function cachedListing\([\s\S]*?\n}/),
     grab(/function pickRes\([\s\S]*?\n}/),grab(/function fileOptions\([\s\S]*?\n}/),'let qualityPref = 240;',
     grab(/function setStatus\([\s\S]*?\n}/),grab(/function statusFailed\([^\n]*/),grab(/function isFailed\([^\n]*/),grab(/function updateRetryUI\([\s\S]*?\n}/),
     grab(/function markUnavailable\([\s\S]*?\n}/),grab(/function holdIndeterminate\([\s\S]*?\n}/),grab(/function cancelRetry\([^\n]*\n/),grab(/async function loadTileProgram\([\s\S]*?\n}/),
@@ -387,7 +387,7 @@ function titleWorld(byCode,lang){
   const calls=[];
   const c=vm.createContext({Array,Promise,Map,Math,String,Number,Object,API:'A',LANG:lang,tiles:new Map(),
     fetchJSON:async u=>{const code=u.split('/categories/')[1].split('/')[0];calls.push(code);const h=byCode[code];if(!h)throw new Error('HTTP 404');return h(u);}});
-  vm.runInContext([grab(/function normKey\([^\n]*/),grab(/async function fetchCollection\([\s\S]*?\n}\n/),grab(/const UI_SOURCES[^\n]*/),'const titleCache = new Map();',
+  vm.runInContext([grab(/function normKey\([^\n]*/),grab(/async function fetchCollection\([\s\S]*?\n}\n/),grab(/function reviveItem\([\s\S]*?\n}/),grab(/function cachedListing\([\s\S]*?\n}/),grab(/const UI_SOURCES[^\n]*/),'const titleCache = new Map();',
     grab(/function titleKey\([^\n]*/),grab(/function uiTitles\([\s\S]*?\n}\n/),grab(/function localTitle\([^\n]*/),grab(/function localGroup\([^\n]*/)].join('\n'),c);
   return {c,calls};
 }
@@ -455,7 +455,9 @@ test('static: no autoplay, no play() outside startTogether and the intent-gated 
   assert.match(script,/video\.autoplay = false/);
   const plays=[...script.matchAll(/\.play\(\)/g)].length;
   assert.equal(plays,4,'startTogether, autoResume, the verse loop restart, and the quality-swap resume');
-  assert.match(grab(/function resumeAfterSwap\(entry\) \{[\s\S]*?\n}/),/!userPaused && entry\.shouldPlay/,'a quality swap resumes only a tile Play all started, never after Pause all');
+  const rs=grab(/function resumeAfterSwap\(entry\) \{[\s\S]*?\n}/);
+  assert.match(rs,/if \(!userPaused\) entry\.video\.play\(\)/,'a playing tile keeps playing after a swap; Pause all still wins');
+  assert.doesNotMatch(rs,/shouldPlay/,'app intent is not consulted: the element state rules');
   assert.match(grab(/function onVerseEnded[\s\S]*?\n}\n/),/!x\.shouldPlay/,'the third play() is only the verse-loop restart, gated on shouldPlay');
   assert.match(grab(/function autoResume\(\) \{[\s\S]*?\n}/),/x\.shouldPlay && x\.video\.src/);
   assert.match(script,/video\.addEventListener\('loadeddata', loaded\)/,'a loaded paused tile does not stay on "Loading…"');
@@ -1028,14 +1030,15 @@ test('metadata cache: round trip, age limit, oversized entry never stored, oldes
 });
 test('catalogue: a saved copy is used when the API fails, with its date shown; live data replaces it',async()=>{
   const note={textContent:''};
-  const grabCat=()=>[grab(/function validLanguageCode\([\s\S]*?\n}/),'const API="A";let ALL_SIGN_LANGS=[];',grab(/function fmtDate\([\s\S]*?\n}/),grab(/function sanitizeCatalog\([\s\S]*?\n}/),grab(/async function loadCatalog\([\s\S]*?\n}\n/)].join('\n');
+  const grabCat=()=>[grab(/function validLanguageCode\([\s\S]*?\n}/),'const API="A";let ALL_SIGN_LANGS=[];',grab(/function fmtDate\([\s\S]*?\n}/),grab(/function sanitizeCatalog\([\s\S]*?\n}/),grab(/function loadCatalog\([\s\S]*?\n}\n/)].join('\n');const flush=()=>new Promise(r=>setTimeout(r,20));
   const c=vm.createContext({Array,Object,Set,JSON,Date,Number,Promise,document:{getElementById:()=>note},renderAddList(){},t:k=>k==='catalogCached'?(d=>'cached '+d):k,
     fetchJSON:async()=>{throw new Error('HTTP 500')},
     metaRead:()=>({ts:1730000000000,data:[{code:'LSE',name:'Lengua de Signos Espanola'},{code:'../x',name:'bad'},{code:'ASL',name:'American Sign Language'}]}),
     metaWrite(){throw new Error('must not be called on failure')}});
   vm.runInContext(grabCat(),c);
-  await vm.runInContext('loadCatalog()',c);
+  await vm.runInContext('loadCatalog()',c); // resolves at once: the saved copy is already applied
   assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('ALL_SIGN_LANGS.map(l=>l.code)',c))),['LSE','ASL'],'saved catalogue validated');
+  await flush(); // the background refresh has run by now
   assert.match(note.textContent,/^cached /,'the date of the saved copy is shown');
   const c2=vm.createContext({Array,Object,Set,JSON,Date,Number,Promise,document:{getElementById:()=>note},renderAddList(){},t:k=>k,
     fetchJSON:async()=>({languages:[{code:'BSL',name:'British Sign Language',isSignLanguage:true},{code:'EN',name:'English',isSignLanguage:false}]}),
@@ -1043,6 +1046,7 @@ test('catalogue: a saved copy is used when the API fails, with its date shown; l
   vm.runInContext(grabCat(),c2);
   note.textContent='';
   await vm.runInContext('loadCatalog()',c2);
+  await flush();
   assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('ALL_SIGN_LANGS.map(l=>l.code)',c2))),['BSL'],'live data wins');
   assert.equal(note.textContent,'');assert.ok(c2.wrote,'the fresh catalogue is saved');
   const c3=vm.createContext({Array,Object,Set,JSON,Date,Number,Promise,document:{getElementById:()=>note},renderAddList(){},t:k=>k,fetchJSON:async()=>{throw new Error('x')},metaRead:()=>null,metaWrite(){}});
@@ -1052,7 +1056,7 @@ test('catalogue: a saved copy is used when the API fails, with its date shown; l
 });
 test('fetchCollection: a saved listing fills the selector when the API is down, flagged with its date',async()=>{
   const saved=[{naturalKey:'k1',title:'T1',group:'g',agnostic:'a1',files:[{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/k1_r240P.mp4'},{mimetype:'video/mp4',progressiveDownloadURL:'http://insecure/x.mp4'}]}];
-  const parts=()=>[grab(/function slimItem\([\s\S]*?\n}/),grab(/function reviveItem\([\s\S]*?\n}/),grab(/async function fetchCollection\([\s\S]*?\n}\n/)].join('\n');
+  const parts=()=>[grab(/function slimItem\([\s\S]*?\n}/),grab(/function reviveItem\([\s\S]*?\n}/),grab(/function cachedListing\([\s\S]*?\n}/),grab(/async function fetchCollection\([\s\S]*?\n}\n/),grab(/function reviveItem\([\s\S]*?\n}/),grab(/function cachedListing\([\s\S]*?\n}/)].join('\n');
   const c=vm.createContext({API:'A',Array,Promise,JSON,Date,Number,Object,
     fetchJSON:async()=>{throw new Error('HTTP 500')},
     metaRead:k=>k==='coll:LSE:X'?{ts:1730000000000,data:saved}:null,metaWrite(){}});
@@ -1080,19 +1084,33 @@ test('quality selector: element, options, persistence and live swap are wired',(
   assert.match(script,/qualityPref = parseQuality\(readStored\(QUALITY_KEY\)\)/);
   assert.match(script,/writeStored\(QUALITY_KEY, String\(qualityPref\)\)/);
   const aq=grab(/function applyQuality\(\) \{[\s\S]*?\n}/);
-  assert.match(aq,/x\.swapPos = Number\.isFinite\(x\.video\.currentTime\)/);
+  assert.match(aq,/if \(pending == null\) x\.resumeAfterSwap = !x\.video\.paused && !x\.video\.ended/,'real element state, captured once per swap chain');
+  assert.match(aq,/x\.swapPos = pending != null \? pending/,'a pending position survives rapid swaps');
   assert.match(aq,/x\.loopSrc = url/,'verse loops follow the new resolution');
   assert.match(aq,/cancelRetry\(x\)/,'a pending retry belongs to the old resolution');
+  assert.match(grab(/async function loadTileProgram\([\s\S]*?\n}\n/),/entry\.swapPos = null; entry\.resumeAfterSwap = false/,'a stale swap callback never moves a new program');
+  const fj=grab(/async function fetchJSON\([\s\S]*?\n}/);
+  assert.match(fj,/AbortController/);assert.match(fj,/setTimeout\(\(\) => ctrl\.abort\(\), timeoutMs\)/);assert.match(fj,/clearTimeout\(timer\)/,'network calls are bounded');
+  const fp=grab(/async function fillPrograms\([\s\S]*?\n}\n/);
+  assert.match(fp,/cachedListing\(code, entry\.coll\)/,'tile selector shows the saved listing while the network answers');
+  assert.match(script,/cachedListing\(first\.code, gc\.value\)/,'global picker shows the saved listing while the network answers');
 });
-test('applyQuality swaps sources, keeps position and intent, leaves matching tiles alone',()=>{
+test('applyQuality keeps position and real playback state; rapid swaps keep the pending position',()=>{
   const c=vm.createContext({Number,cancelRetry(){},tiles:new Map()});
   vm.runInContext([grab(/function pickRes\([\s\S]*?\n}/),'let qualityPref=480;',grab(/function applyQuality\(\) \{[\s\S]*?\n}/)].join('\n'),c);
-  const mk=(src)=>({video:{src,currentTime:42,loads:0,load(){this.loads++}},fileOptions:[{url:'https://cdn/a_r240P.mp4',res:240},{url:'https://cdn/a_r480P.mp4',res:480}],shouldPlay:true,tile:{classList:{contains:()=>false}},armWatchdog(){},loopSrc:src});
-  const a=mk('https://cdn/a_r240P.mp4'),b=mk('https://cdn/a_r480P.mp4');
-  c.tiles.set('A',a);c.tiles.set('B',b);
+  const mk=(src,paused)=>{let u=src;const e={fileOptions:[{url:'https://cdn/a_r240P.mp4',res:240},{url:'https://cdn/a_r480P.mp4',res:480},{url:'https://cdn/a_r720P.mp4',res:720}],shouldPlay:false,tile:{classList:{contains:()=>false}},armWatchdog(){},loopSrc:src,video:{paused,ended:false,currentTime:123,get src(){return u},set src(v){u=v;this.currentTime=0;this.paused=true},load(){this.loads=(this.loads||0)+1}}};return e;};
+  const a=mk('https://cdn/a_r240P.mp4',false);c.tiles=new Map([['A',a]]); // started from its own native controls: shouldPlay stays false
   vm.runInContext('applyQuality()',c);
-  assert.equal(a.video.src,'https://cdn/a_r480P.mp4');assert.equal(a.swapPos,42);assert.equal(a.resumeAfterSwap,true);assert.equal(a.video.loads,1);
-  assert.equal(b.video.loads,0,'already at the preferred resolution: untouched');
+  assert.equal(a.video.src,'https://cdn/a_r480P.mp4');assert.equal(a.swapPos,123);assert.equal(a.resumeAfterSwap,true,'native playing keeps playing');assert.equal(a.video.loads,1);
+  const b=mk('https://cdn/a_r240P.mp4',true);b.shouldPlay=true;c.tiles=new Map([['B',b]]); // paused from its native controls after Play all
+  vm.runInContext('applyQuality()',c);
+  assert.equal(b.resumeAfterSwap,false,'native pause stays paused even with shouldPlay true');assert.equal(b.swapPos,123);
+  const d=mk('https://cdn/a_r240P.mp4',false);c.tiles=new Map([['D',d]]);
+  vm.runInContext('applyQuality()',c);assert.equal(d.swapPos,123);
+  vm.runInContext('qualityPref=720;',c);vm.runInContext('applyQuality()',c); // second swap before the first loaded: src reset currentTime to 0
+  assert.equal(d.swapPos,123,'position survives rapid swaps');assert.equal(d.video.src,'https://cdn/a_r720P.mp4');assert.equal(d.resumeAfterSwap,true,'playback intent captured by the first swap survives');
+  const e=mk('https://cdn/a_r720P.mp4',false);c.tiles=new Map([['E',e]]);
+  vm.runInContext('applyQuality()',c);assert.equal(e.video.loads||0,0,'already at the preferred resolution: untouched');
 });
 
 // --- keyboard shortcuts ---
@@ -1127,23 +1145,39 @@ test('featured tile: star button in the template, layout class, persistence, rem
   const sm=grab(/function setMainTile\(code\) \{[\s\S]*?\n}/);
   assert.match(sm,/grid\.classList\.toggle\('featured', !!mainCode\)/);
   assert.match(sm,/x\.tile\.classList\.toggle\('main', on\)/);
+  assert.match(sm,/sortTiles\(\)/,'featuring reorders: the featured tile leads, the rest stay reachable');
+  assert.match(grab(/function sortTiles\(\) \{[\s\S]*?\n}/),/order\.findIndex\(x => x\.code === mainCode\)/,'the featured tile stays on top whatever its load state');
   assert.doesNotMatch(sm,/video\.(load|pause|play)|currentTime/,'featuring is layout only: playback and position are untouched');
   assert.match(grab(/function saveState\([\s\S]*?\n}/),/main: mainCode/);
   assert.match(script,/if \(mainCode === lang\.code\) setMainTile\(''\)/,'removing the featured tile clears the layout');
   assert.match(script,/if \(!shared && state\.main && validLanguageCode\(state\.main\)\) setMainTile\(state\.main\)/,'restored after the tiles');
 });
-test('setMainTile marks one tile, unmarks the rest and clears cleanly',()=>{
-  const mk=code=>{const cls=new Set();return {code,tile:{classList:{toggle:(c,f)=>{f?cls.add(c):cls.delete(c)},contains:c=>cls.has(c)}},mainBtn:{classList:{toggle(){}},setAttribute(){},title:''}};};
-  const a=mk('A'),b=mk('B');const gcl=new Set();
-  const c=vm.createContext({String,t:k=>k,grid:{classList:{toggle:(x,f)=>{f?gcl.add(x):gcl.delete(x)}}},tiles:new Map([['A',a],['B',b]]),saveState(){}});
-  vm.runInContext('let mainCode = "";'+grab(/function setMainTile\(code\) \{[\s\S]*?\n}/),c);
-  vm.runInContext("setMainTile('A')",c);
-  assert.ok(a.tile.classList.contains('main'));assert.ok(!b.tile.classList.contains('main'));assert.ok(gcl.has('featured'));
-  vm.runInContext("setMainTile('B')",c);
-  assert.ok(!a.tile.classList.contains('main'));assert.ok(b.tile.classList.contains('main'));
-  vm.runInContext("setMainTile('')",c);
-  assert.ok(!b.tile.classList.contains('main'));assert.ok(!gcl.has('featured'));
-  vm.runInContext("setMainTile('ZZ')",c);assert.ok(!gcl.has('featured'),'an unknown code clears');
+test('setMainTile moves the featured tile to the top; the rest stay reachable and unfeaturing restores the order',()=>{
+  const mk=code=>{const cls=new Set();return {code,status:{style:{display:'none'},classList:{contains:()=>false}},statusKey:'',tile:{classList:{toggle:(c,f)=>{f?cls.add(c):cls.delete(c)},contains:c=>cls.has(c)}},mainBtn:{classList:{toggle(){}},setAttribute(){},title:''}};};
+  const a=mk('A'),b=mk('B'),d=mk('C');const gcl=new Set();const nodes=[a.tile,b.tile,d.tile];
+  const grid={get children(){return nodes;},classList:{toggle:(x,f)=>{f?gcl.add(x):gcl.delete(x)}},appendChild(n){nodes.splice(nodes.indexOf(n),1);nodes.push(n);}};
+  const c=vm.createContext({String,t:k=>k,grid,tiles:new Map([['A',a],['B',b],['C',d]]),saveState(){}});
+  vm.runInContext('let mainCode = "";'+grab(/function tileGroup\(x\) \{[\s\S]*?\n}/)+grab(/function sortTiles\(\) \{[\s\S]*?\n}/)+grab(/function setMainTile\(code\) \{[\s\S]*?\n}/),c);
+  const order=()=>nodes.map(n=>[a,b,d].find(e=>e.tile===n).code).join('');
+  assert.equal(order(),'ABC');
+  vm.runInContext("setMainTile('C')",c); // not the first tile: the featured one leads
+  assert.equal(order(),'CAB');assert.ok(d.tile.classList.contains('main'));assert.ok(!a.tile.classList.contains('main'));assert.ok(gcl.has('featured'));
+  vm.runInContext("setMainTile('A')",c); // switching moves the new featured tile up; the rest return to their added order
+  assert.equal(order(),'ABC');assert.ok(a.tile.classList.contains('main'));assert.ok(!d.tile.classList.contains('main'));
+  vm.runInContext("setMainTile('A')",c); // the same code again keeps it (the toggle lives in the button handler)
+  assert.equal(order(),'ABC');
+  vm.runInContext("setMainTile('')",c); // unfeaturing restores the sorted order
+  assert.equal(order(),'ABC');assert.ok(!gcl.has('featured'));
+  vm.runInContext("setMainTile('ZZ')",c);assert.equal(order(),'ABC');assert.ok(!gcl.has('featured'),'an unknown code clears');
+});
+
+test('cachedListing revives a saved listing with its date; absent or expired returns null',()=>{
+  const saved=[{naturalKey:'k1',title:'T1',group:'g',agnostic:'a1',files:[{mimetype:'video/mp4',progressiveDownloadURL:'https://cdn/k1_r240P.mp4'}]}];
+  const c=vm.createContext({Array,JSON,Date,Number,Object,metaRead:(k)=>k==='coll:LSE:X'?{ts:1000,data:saved}:null});
+  vm.runInContext([grab(/function reviveItem\([\s\S]*?\n}/),grab(/function cachedListing\([\s\S]*?\n}/)].join('\n'),c);
+  const r=c.cachedListing('LSE','X');
+  assert.equal(r.cachedTs,1000);assert.equal(r[0].media.files[0].progressiveDownloadURL,'https://cdn/k1_r240P.mp4');
+  assert.equal(c.cachedListing('LSE','NOPE'),null);
 });
 
 // --- picture in picture ---

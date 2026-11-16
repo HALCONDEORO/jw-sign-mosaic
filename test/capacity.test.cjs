@@ -77,7 +77,7 @@ function runSort(flags){ // flags: true = novideo
   const grid={appendChild:(node)=>calls.push(nodes.indexOf(node))};
   const nodes=flags.map(mkTile);
   const tiles=new Map(flags.map((f,i)=>['L'+i,{tile:nodes[i]}]));
-  const ctx=vm.createContext({grid,tiles});
+  const ctx=vm.createContext({grid,tiles,mainCode:''});
   vm.runInContext(sortSrc+'\nsortTiles();',ctx);
   return calls;
 }
@@ -134,7 +134,7 @@ function sortWith(specs, preorder){ // spec: 'ok' | 'err' | 'slow' | 'nv' | 'nve
   const nodes=(preorder||specs.map((_,i)=>i)).map(i=>ents[i].tile);
   const moved=[];
   const grid={get children(){return nodes;},appendChild:(n)=>{moved.push(ents.findIndex(e=>e.tile===n));nodes.splice(nodes.indexOf(n),1);nodes.push(n);}};
-  vm.runInContext(sortSrc+'\nsortTiles();',vm.createContext({grid,tiles}));
+  vm.runInContext(sortSrc+'\nsortTiles();',vm.createContext({grid,tiles,mainCode:''}));
   return {order:nodes.map(n=>ents.findIndex(e=>e.tile===n)),moved};
 }
 test('good first, load errors next, unavailable last, stable inside each group',()=>{
