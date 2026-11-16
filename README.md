@@ -23,7 +23,12 @@ Twenty sign-language tiles with Psalm 23 selected. Video areas are heavily blurr
 - **Strict Bible availability**: a language without the chapter, or without a marker for the chosen verse, shows the black "Not available in this language" cell. It never loads a different passage or the chapter from its start. Verse markers come from the jw.org sign-language Bible (pub-media API); "Whole chapter" does not need them.
 - **Synchronized start**: Play all and Sync pause every tile, wait until each can show a frame, seek all to the furthest common timestamp and press play together. Tiles still loading are skipped and reported.
 - **One volume control**: a single slider; only one tile has sound at a time (also when you unmute from a tile's own player controls).
-- **Shareable link**: "Copy link" gives a URL that opens the mosaic with the same languages, collection and publication.
+- **Shareable link**: "Copy link" gives a URL that opens the mosaic exactly as you have it: same languages, and each tile's own collection and publication when it differs from the shared one.
+- **Video quality selector**: 240p (the default, easiest on data and battery), 480p or 720p when the publication offers them. Changing quality swaps every loaded tile to the new resolution without losing position or play/pause state.
+- **Keyboard shortcuts**: K or Space toggles play, S syncs, J/Left and L/Right skip 10 seconds. Shortcuts stay out of form fields and focused buttons.
+- **Opens instantly, degrades gracefully**: the catalogue and publication listings are cached as metadata (titles and links, never media) and refreshed on every visit. If the jw.org API is unreachable, the saved lists are shown with their date. Videos always stream live; nothing is rehosted.
+- **Featured tile**: star a tile to feature it full-width at the top of the mosaic, and unstar to return it to the grid. Featuring is layout only: the video never reloads or loses its position.
+- **Picture in picture**: each tile has a PiP button (browsers that support it) to float that video over other windows.
 - **Jump all to the same position**: a slider (same relative position in every video) plus -10 s / +10 s buttons. The jw.org API exposes no chapter or song markers, so jumping is position based.
 - **Retry failed**: a button appears when some tiles fail and reloads only those. A retried tile loads paused and joins the next Play all.
 - **Tile order**: tiles that load come first, then tiles with a load error, then tiles whose language has no such video. Order inside each group is the order you added them. Tiles are moved, not rebuilt, so playing videos are not interrupted, and a failed tile that loads on retry moves back up.
@@ -42,7 +47,7 @@ Use only for personal, noncommercial viewing. [JW terms](https://www.jw.org/en/t
 
 ## Tests
 
-Run `node --test test/*.test.cjs` (Node 22, the version used by CI). The offline tests cover default languages, additions, restoration, input validation, strict program matching, synchronized start, shared volume, share links, retry, tile ordering, storage failures, and the Bible passage picker (strict availability, verse start, verse repeat). They do not prove all catalogue translations exist or that a device can play the entire catalogue at once.
+Run `node --test test/*.test.cjs` (Node 22, the version used by CI). The offline tests cover default languages, additions, restoration, input validation, strict program matching, synchronized start, shared volume, share links, retry, tile ordering, storage failures, and the Bible passage picker (strict availability, verse start, verse repeat). They also cover the quality picker, full-state share links, keyboard shortcuts, the metadata cache, the featured tile and picture in picture. They do not prove all catalogue translations exist or that a device can play the entire catalogue at once.
 
 Personal, unaffiliated project. Not endorsed by JW.org or its publishers.
 

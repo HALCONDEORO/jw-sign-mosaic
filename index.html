@@ -64,6 +64,9 @@
   .counter { color:var(--muted); font-size:13px; }
   .tile .note { font-size:12px; color:var(--muted); padding:0 8px 6px; }
   .globrow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:8px 18px; border-bottom:1px solid var(--border); background:#0a0d12; font-size:13px; color:var(--muted); }
+  #grid.featured .tile.main { grid-column:1 / -1; }
+  #grid.featured .tile.main video { max-height:72vh; }
+  .tile-head button.on { border-color:var(--accent); color:var(--accent); }
 </style>
 </head>
 <body>
@@ -80,19 +83,26 @@
   <div class="sub" id="tSub">JW Broadcasting y otras publicaciones con vídeo en lenguas de signos, varias a la vez. Vídeo en directo desde jw.org.</div>
 </header>
 <div class="controls">
-  <button class="primary" id="playAll">▶</button>
-  <button id="pauseAll">⏸</button>
-  <button id="syncAll">⟳</button>
+  <button class="primary" id="playAll" title="K" aria-keyshortcuts="k">▶</button>
+  <button id="pauseAll" title="K" aria-keyshortcuts="k">⏸</button>
+  <button id="syncAll" title="S" aria-keyshortcuts="s">⟳</button>
   <span class="counter" id="counter" aria-live="polite"></span>
   <span class="counter" id="notice" role="status"></span>
   <label class="counter" for="vol" id="tVol"></label>
   <input id="vol" type="range" min="0" max="1" step="0.05" value="1" style="width:110px;padding:0">
+  <label class="counter" for="quality" id="tQual"></label>
+  <select id="quality">
+    <option value="240"></option>
+    <option value="480"></option>
+    <option value="720"></option>
+  </select>
   <button id="addAll"></button>
   <button id="stopAdd" hidden></button>
   <button id="retryFailed" hidden></button>
   <button id="rmAll"></button>
   <button id="shareBtn"></button>
   <span id="addProgress" role="status"></span>
+  <span id="catalogNote" class="counter" role="status"></span>
   <span style="flex:1"></span>
   <div class="addwrap">
     <button id="addBtn" aria-expanded="false" aria-controls="addPanel">＋</button>
@@ -117,11 +127,11 @@
   <span id="tJump"></span>
   <input id="jumpSlider" type="range" min="0" max="1000" value="0" style="flex:1;min-width:140px;padding:0" aria-label="Position">
   <span id="jumpPct" style="min-width:3.5em">0%</span>
-  <button id="back10"></button>
-  <button id="fwd10"></button>
+  <button id="back10" title="J / ←" aria-keyshortcuts="j arrowleft"></button>
+  <button id="fwd10" title="L / →" aria-keyshortcuts="l arrowright"></button>
 </div>
 <p id="capacityNote" style="margin:10px 18px;color:var(--muted);font-size:13px"></p>
-<div id="grid"></div>
+<div id="grid" role="region"></div>
 <footer id="tFooter"></footer>
 <script>
 'use strict';
@@ -166,6 +176,11 @@ const I18N = {
     partialTip: 'La lista de publicaciones está incompleta. Usa Reintentar fallidas.',
     listIncomplete: 'La lista está incompleta y no se encontró la publicación elegida. Toca aquí o usa Reintentar fallidas.',
     naText: 'No disponible en esta lengua',
+    qualLbl: 'Calidad', qualTip: 'Calidad de vídeo: se aplica al momento a los vídeos ya cargados',
+    q240: 'Ahorro (240p)', q480: 'Estándar (480p)', q720: 'Alta (720p)',
+    mainTip: 'Ver esta lengua en grande', unmainTip: 'Restablecer el tamaño normal',
+    pipTip: 'Imagen en imagen', gridLbl: 'Mosaico de vídeos',
+    catalogCached: d => 'Catálogo guardado del ' + d, listCached: d => 'Lista guardada del ' + d,
     footer: 'Vídeos servidos directamente desde los servidores de jw.org (API pública y CDN). Herramienta personal, sin afiliación ni respaldo oficial. La reproducción simultánea depende de la disponibilidad del vídeo y de tu dispositivo.'
   },
   en: {
@@ -203,6 +218,11 @@ const I18N = {
     partialTip: 'The publication list is incomplete. Use Retry failed.',
     listIncomplete: 'The list is incomplete and the chosen publication was not found. Tap here or use Retry failed.',
     naText: 'Not available in this language',
+    qualLbl: 'Quality', qualTip: 'Video quality: applies right away to already loaded videos',
+    q240: 'Saver (240p)', q480: 'Standard (480p)', q720: 'High (720p)',
+    mainTip: 'Feature this language', unmainTip: 'Back to normal size',
+    pipTip: 'Picture in picture', gridLbl: 'Video mosaic',
+    catalogCached: d => 'Saved catalogue from ' + d, listCached: d => 'Saved list from ' + d,
     footer: 'Videos served directly from jw.org servers (public API and CDN). Personal tool, not affiliated or endorsed. Simultaneous playback depends on video availability and your device.'
   }
 };
@@ -212,6 +232,41 @@ function readStored(key) {
 }
 function writeStored(key, value) {
   try { localStorage.setItem(key, value); return true; } catch (e) { return false; }
+}
+// Small metadata cache: catalogue listings only (titles and file links), never the videos themselves.
+const META_KEY = 'jwSignMosaic.meta.v1';
+const META_LIMIT = 350 * 1024;
+function metaEntries() {
+  try { const d = JSON.parse(readStored(META_KEY) || 'null'); return (d && d.v === 1 && d.entries && typeof d.entries === 'object') ? d.entries : {}; } catch (e) { return {}; }
+}
+function metaRead(key, maxAge) {
+  const e = metaEntries()[key];
+  if (!e || !Number.isFinite(e.ts) || e.data === undefined) return null;
+  if (maxAge && Date.now() - e.ts > maxAge) return null;
+  return e;
+}
+function metaWrite(key, data) {
+  const entries = metaEntries();
+  entries[key] = { ts: Date.now(), data };
+  let s = JSON.stringify({ v: 1, entries });
+  while (s.length > META_LIMIT) { // too big for localStorage: drop the oldest entries first
+    const oldest = Object.keys(entries).sort((a, b) => entries[a].ts - entries[b].ts)[0];
+    if (oldest === undefined) return false;
+    delete entries[oldest];
+    s = JSON.stringify({ v: 1, entries });
+  }
+  return writeStored(META_KEY, s);
+}
+function fmtDate(ts) {
+  try { return new Date(ts).toLocaleString(LANG === 'es' ? 'es' : 'en', { dateStyle: 'medium', timeStyle: 'short' }); }
+  catch (e) { return new Date(ts).toISOString(); }
+}
+function sanitizeCatalog(list) { // a saved catalogue is data, not truth: every entry is re-validated
+  const seen = new Set();
+  return (Array.isArray(list) ? list : []).filter(l => {
+    if (!l || !validLanguageCode(l.code) || typeof l.name !== 'string' || !l.name || l.name.length > 120 || seen.has(l.code)) return false;
+    seen.add(l.code); return true;
+  }).map(l => ({ code: l.code, name: l.name, vernacular: typeof l.vernacular === 'string' ? l.vernacular : '', isSignLanguage: true }));
 }
 let LANG = (readStored('jwSignMosaic.lang') || (navigator.language || 'es')).toLowerCase().startsWith('en') ? 'en' : 'es';
 const t = k => I18N[LANG][k];
@@ -261,7 +316,7 @@ function loadState() {
 function saveState() {
   // want = the publication a tile was asked for but could not show; without it a reload would load the first video
   const langs = [...tiles.values()].map(x => ({ code: x.code, coll: x.coll, prog: x.prog, want: x.want || '' }));
-  writeStored(LS_KEY, JSON.stringify({ langs, sel: SEL }));
+  writeStored(LS_KEY, JSON.stringify({ langs, sel: SEL, main: mainCode }));
 }
 function updateCounter() { document.getElementById('counter').textContent = t('counter')(tiles.size); }
 function tileGroup(x) { // 0 = loads fine, 1 = load error (retriable), 2 = no video in this language
@@ -337,9 +392,20 @@ async function fetchJSON(url) {
   return r.json();
 }
 
+function slimItem(it) { // metadata cache: titles and file links only, never the videos themselves
+  return { naturalKey: it.naturalKey, title: it.title, group: it.group, agnostic: it.agnostic,
+    files: ((it.media && it.media.files) || []).filter(f => f && f.mimetype === 'video/mp4' && typeof f.progressiveDownloadURL === 'string')
+      .map(f => ({ mimetype: f.mimetype, progressiveDownloadURL: f.progressiveDownloadURL })) };
+}
+function reviveItem(it) { // a saved listing is data, not truth: every entry is re-validated
+  if (!it || typeof it.naturalKey !== 'string' || typeof it.title !== 'string') return null;
+  const files = (Array.isArray(it.files) ? it.files : []).filter(f => f && f.mimetype === 'video/mp4' && /^https:\/\//.test(f.progressiveDownloadURL || ''));
+  return { naturalKey: it.naturalKey, title: it.title, group: typeof it.group === 'string' ? it.group : '', agnostic: typeof it.agnostic === 'string' ? it.agnostic : undefined, media: { files } };
+}
 // Returns [{naturalKey,title,group,media,agnostic}] flattening one subcategory level.
 async function fetchCollection(code, collKey) {
   const out = [];
+  const mkey = 'coll:' + code + ':' + collKey;
   try {
     const d = await fetchJSON(`${API}/categories/${code}/${collKey}?detailed=1&clientType=www`);
     const cat = d.category || {};
@@ -359,7 +425,15 @@ async function fetchCollection(code, collKey) {
         } catch (e) { out.partial = true; } // this subcategory failed: keep what we have and let the user retry
       }
     }
+    try { if (!out.partial && out.length) metaWrite(mkey, out.map(slimItem)); } catch (e) {} // best effort: a partial or empty list is not cached
   } catch (e) { out.failed = true; } // request failed: different from a catalogue that is genuinely empty
+  if (out.failed) { // the live API failed: a recent saved listing (metadata only) still fills the selector
+    try {
+      const cached = metaRead(mkey, 7 * 24 * 3600 * 1000);
+      const items = cached && Array.isArray(cached.data) ? cached.data.map(reviveItem).filter(Boolean) : [];
+      if (items.length) { for (const it of items) out.push(it); delete out.failed; out.cachedTs = cached.ts; }
+    } catch (e) {}
+  }
   return out;
 }
 
@@ -423,7 +497,7 @@ function fetchBibleChapter(code, book, chapter) {
       if (!withRes.length) return { state: 'none' };
       const verses = new Map();
       for (const f of files) for (const mk of ((f.markers && f.markers.markers) || [])) { const sec = timeToSec(mk.startTime); if (Number.isFinite(sec) && Number.isInteger(mk.verseNumber) && !verses.has(mk.verseNumber)) verses.set(mk.verseNumber, sec); }
-      return { state: 'ok', src: withRes[0].f.file.url, duration: withRes[0].f.duration, verses };
+      return { state: 'ok', src: withRes[0].f.file.url, duration: withRes[0].f.duration, verses, options: withRes.map(w => ({ url: w.f.file.url, res: w.res })) };
     })();
     let timer;
     const p = Promise.race([work, new Promise(res => { timer = setTimeout(() => res({ state: 'failed' }), BIBLE_TIMEOUT); })]);
@@ -465,17 +539,27 @@ async function relabelTile(x) { // interface language changed: relabel the exist
   for (const og of x.sel.querySelectorAll('optgroup')) { const first = (x.items || []).find(it => it.group === og.dataset.g); if (first) og.label = localGroup(first, tm); }
 }
 
-function pickFile(media) {
-  const mp4s = (media.files || [])
+const QUALITY_KEY = 'jwSignMosaic.quality';
+function parseQuality(v) { const n = parseInt(v, 10); return (n === 240 || n === 480 || n === 720) ? n : 240; }
+let qualityPref = parseQuality(readStored(QUALITY_KEY)); // default stays 240p: many tiles at once cost memory, battery and data
+// Highest resolution not above the preference; the lowest when every file is above it.
+function pickRes(options, target) {
+  const opts = (Array.isArray(options) ? options : []).filter(o => o && /^https:\/\//.test(o.url || '') && Number.isFinite(o.res));
+  if (!opts.length) return '';
+  let below = null, low = opts[0];
+  for (const o of opts) {
+    if (o.res <= target && (!below || o.res > below.res)) below = o;
+    if (o.res < low.res) low = o;
+  }
+  return (below || low).url;
+}
+function fileOptions(media) {
+  return (media.files || [])
     .filter(f => f.mimetype === 'video/mp4' && f.progressiveDownloadURL)
-    .map(f => {
-      const m = f.progressiveDownloadURL.match(/_r(\d+)P\.mp4/);
-      return { url: f.progressiveDownloadURL, res: m ? parseInt(m[1], 10) : 9999 };
-    })
-    .sort((a, b) => a.res - b.res);
-  if (!mp4s.length) return null;
-  const preferred = mp4s.find(f => f.res === 240) || mp4s[0];
-  return preferred.url;
+    .map(f => ({ url: f.progressiveDownloadURL, res: +((/_r(\d+)P\.mp4/.exec(f.progressiveDownloadURL) || [])[1] || 9999) }));
+}
+function pickFile(media) {
+  return pickRes(fileOptions(media), qualityPref) || null;
 }
 
 function normKey(it) { return (it && (it.agnostic || it.naturalKey)) ? String(it.agnostic || it.naturalKey).replace(/_[A-Z]{2,5}(_\d+_VIDEO)$/, '\$1') : ''; }
@@ -587,6 +671,7 @@ function clampVolume(x) { const n = Number(x); return Number.isFinite(n) ? Math.
 const savedVol = readStored(VOL_KEY);
 let masterVol = clampVolume(savedVol === null ? 1 : savedVol);
 let audible = null; // the only tile that may produce sound
+let mainCode = ''; // the tile shown large above the rest; empty = uniform grid
 function muteOthers(except) { // pass null to silence every tile
   audible = except || null;
   for (const x of tiles.values()) {
@@ -595,6 +680,38 @@ function muteOthers(except) { // pass null to silence every tile
     x.video.volume = masterVol;
     x.audioBtn.textContent = on ? '🔊' : '🔇';
   }
+}
+function setMainTile(code) { // one large tile above the rest; only layout classes change, playback is untouched
+  mainCode = (code && tiles.has(code)) ? code : '';
+  grid.classList.toggle('featured', !!mainCode);
+  for (const x of tiles.values()) {
+    const on = x.code === mainCode;
+    x.tile.classList.toggle('main', on);
+    if (x.mainBtn) {
+      x.mainBtn.classList.toggle('on', on);
+      x.mainBtn.title = on ? t('unmainTip') : t('mainTip');
+      x.mainBtn.setAttribute('aria-label', on ? t('unmainTip') : t('mainTip'));
+      x.mainBtn.setAttribute('aria-pressed', String(on));
+    }
+  }
+  saveState();
+}
+function applyQuality() { // swap loaded sources to the new preference, keeping position and playback intent
+  for (const x of tiles.values()) {
+    if (!x.fileOptions || !x.fileOptions.length || !x.video.src || x.tile.classList.contains('novideo')) continue;
+    const url = pickRes(x.fileOptions, qualityPref);
+    if (!url || url === x.video.src) continue;
+    x.swapPos = Number.isFinite(x.video.currentTime) ? x.video.currentTime : null;
+    x.resumeAfterSwap = !!x.shouldPlay;
+    cancelRetry(x); // a pending retry belongs to the old resolution
+    x.video.src = url; x.loopSrc = url; x.video.load();
+    if (x.armWatchdog) x.armWatchdog();
+  }
+}
+function resumeAfterSwap(entry) { // a quality swap on a tile that Play all started keeps it playing; Pause all wins
+  if (!entry.resumeAfterSwap) return;
+  entry.resumeAfterSwap = false;
+  if (!userPaused && entry.shouldPlay) entry.video.play().catch(() => {});
 }
 function setMasterVolume(v) {
   masterVol = clampVolume(v);
@@ -610,6 +727,14 @@ function onNativeVolume(entry) {
   else if (audible === entry && Math.abs(v.volume - masterVol) > 0.001) setMasterVolume(v.volume);
 }
 document.getElementById('vol').addEventListener('input', e => setMasterVolume(e.target.value));
+const qualitySel = document.getElementById('quality');
+qualitySel.value = String(qualityPref);
+qualitySel.addEventListener('change', () => {
+  qualityPref = parseQuality(qualitySel.value);
+  qualitySel.value = String(qualityPref);
+  writeStored(QUALITY_KEY, String(qualityPref));
+  applyQuality();
+});
 
 function markUnavailable(entry, want, msgKey) { // never substitute another video: report it and leave the tile empty
   const { status, tile, video, sel } = entry;
@@ -638,6 +763,7 @@ async function loadTileProgram(entry, item) {
   if (tiles.get(entry.code) !== entry) return; // the tile was removed while its list was loading: never revive it
   cancelRetry(entry); // a pending automatic reload belongs to the old source
   entry.prog = item ? item.naturalKey : '';
+  entry.fileOptions = item ? (item.fileOptions || (item.media ? fileOptions(item.media) : null)) : null;
   entry.shouldPlay = false; // a new source always loads paused
   if (item) entry.want = '';
   tile.classList.remove('indet');
@@ -646,6 +772,7 @@ async function loadTileProgram(entry, item) {
     tile.classList.add('novideo');
     video.pause(); video.removeAttribute('src'); video.load();
     setStatus(entry, 'noVideoPub');
+    entry.note.textContent = entry.cachedListTs ? t('listCached')(fmtDate(entry.cachedListTs)) : '';
     saveState(); refreshGlobalPicker(); sortTiles();
     return;
   }
@@ -660,6 +787,7 @@ async function loadTileProgram(entry, item) {
       if (entry.armWatchdog) entry.armWatchdog();
     } else { setStatus(entry, 'noMp4', undefined, true); }
   } catch (e) { setStatus(entry, 'loadErr', e.message, true); }
+  entry.note.textContent = entry.cachedListTs ? t('listCached')(fmtDate(entry.cachedListTs)) : '';
   saveState(); refreshGlobalPicker(); sortTiles();
 }
 
@@ -692,7 +820,7 @@ async function fillBible(entry, key, listOnly) {
   if (r.state === 'none') { markUnavailable(entry, key); return; } // this language has no such chapter: black cell, never another passage
   const start = p.verse ? r.verses.get(p.verse) : 0;
   if (p.verse && !Number.isFinite(start)) { markUnavailable(entry, key); return; } // this language has no marker for that verse: black cell, never the chapter from its start
-  const item = { naturalKey: key, title: bibleLabel(p), group: '', media: null, bibleSrc: r.src, startAt: Number.isFinite(start) ? start : 0, endAt: Number.isFinite(start) ? verseEnd(r.verses, start) : undefined, loop: !!(p.verse && Number.isFinite(start)) };
+  const item = { naturalKey: key, title: bibleLabel(p), group: '', media: null, bibleSrc: r.options ? pickRes(r.options, qualityPref) : r.src, fileOptions: r.options || null, startAt: Number.isFinite(start) ? start : 0, endAt: Number.isFinite(start) ? verseEnd(r.verses, start) : undefined, loop: !!(p.verse && Number.isFinite(start)) };
   entry.items = [item];
   entry.sel.selectedIndex = 0;
   await loadTileProgram(entry, item);
@@ -788,16 +916,22 @@ function fetchPubMedia(lang, code) {
       const single = expected.length === 1;
       const files = (((d.files || {})[lang] || {}).MP4 || []).filter(f => f && f.file && /^https:\/\//.test(f.file.url || ''));
       if (single && new Set(files.map(f => f.track)).size > 1) return { state: 'none' }; // a single-video publication must have exactly one track
-      const best = new Map(); // track -> lowest resolution file
+      const best = new Map(); // track -> { title, options: every resolution }
       for (const f of files) {
         const tr = single ? expected[0] : f.track; // a single-video publication needs no pairing
         if (!Number.isInteger(tr)) continue;
         const res = +((/_r(\d+)P\.mp4/.exec(f.file.url) || [])[1] || 9999);
-        const cur = best.get(tr);
-        if (!cur || res < cur.res) best.set(tr, { res, src: f.file.url, title: f.title || '' });
+        let cur = best.get(tr);
+        if (!cur) { cur = { title: f.title || '', options: [] }; best.set(tr, cur); }
+        cur.options.push({ url: f.file.url, res });
       }
       if (best.size !== expected.length || !expected.every(n => best.has(n))) return { state: 'none' };
-      return { state: 'ok', tracks: best };
+      const tracks = new Map(); // src stays the lowest resolution; the quality picker chooses from options
+      for (const [n, v] of best) {
+        v.options.sort((a, b) => a.res - b.res);
+        tracks.set(n, { res: v.options[0].res, src: v.options[0].url, title: v.title, options: v.options });
+      }
+      return { state: 'ok', tracks };
     })();
     let timer;
     const p = Promise.race([work, new Promise(res => { timer = setTimeout(() => res({ state: 'failed' }), BIBLE_TIMEOUT); })]);
@@ -845,7 +979,7 @@ async function fillPub(entry, key, listOnly) {
   const titles = await pubTrackTitles(p.code); // labels use the interface language, not this tile's sign language
   if (tiles.get(entry.code) !== entry || entry.coll !== 'PUBS' || req !== entry.pubReq) return;
   o.textContent = pubLabel(p, titles.get(trackNo)); // no interface-language title: '#position', never the tile's own language
-  const item = { naturalKey: key, title: o.textContent, group: '', media: null, bibleSrc: tr.src, startAt: 0 };
+  const item = { naturalKey: key, title: o.textContent, group: '', media: null, bibleSrc: tr.options ? pickRes(tr.options, qualityPref) : tr.src, fileOptions: tr.options || null, startAt: 0 };
   entry.items = [item];
   entry.sel.selectedIndex = 0;
   await loadTileProgram(entry, item);
@@ -858,6 +992,7 @@ async function fillPrograms(entry, keepProg, strict, deferLoad, listOnly) {
   const lang0 = LANG;
   let [items, tm] = await Promise.all([fetchCollection(code, entry.coll), uiTitles(entry.coll)]);
   if (lang0 !== LANG) tm = await uiTitles(entry.coll); // the interface language changed while loading
+  entry.cachedListTs = items.cachedTs || 0;
   if (items.failed && listOnly) return; // keep the old list when a refresh fails
   sel.innerHTML = '';
   entry.items = items;
@@ -904,6 +1039,8 @@ async function addTile(lang) {
     <div class="tile-head">
       <span class="lang"></span>
       <button class="audio" title="${t('audioTip')}" aria-label="${t('audioTip')}">🔇</button>
+      <button class="main" title="${t('mainTip')}" aria-label="${t('mainTip')}" aria-pressed="false">★</button>
+      <button class="pip" title="${t('pipTip')}" aria-label="${t('pipTip')}" hidden>⧉</button>
       <button class="fs" title="${t('fsTip')}" aria-label="${t('fsTip')}">⛶</button>
       <button class="rm" title="${t('rmTip')}" aria-label="${t('rmTip')}">✕</button>
     </div>
@@ -939,9 +1076,12 @@ async function addTile(lang) {
       }
     }, 12000);
   };
-  const loaded = () => { clearTimeout(loadTimer); status.style.display = 'none'; updateRetryUI(); sortTiles(); };
+  const loaded = () => { clearTimeout(loadTimer); status.style.display = 'none'; updateRetryUI(); sortTiles(); resumeAfterSwap(entry); };
   video.addEventListener('playing', loaded);
-  video.addEventListener('loadedmetadata', () => { if (entry.startAt > 0 && Number.isFinite(video.duration) && entry.startAt < video.duration) video.currentTime = entry.startAt; }); // Bible verse start
+  video.addEventListener('loadedmetadata', () => { // Bible verse start; a quality swap keeps the position
+    if (entry.swapPos != null) { const p = entry.swapPos; entry.swapPos = null; if (Number.isFinite(video.duration)) video.currentTime = Math.max(0, Math.min(p, video.duration - 0.2)); }
+    else if (entry.startAt > 0 && Number.isFinite(video.duration) && entry.startAt < video.duration) video.currentTime = entry.startAt;
+  });
   video.addEventListener('ended', () => onVerseEnded(entry)); // last verse: chapter end
   video.addEventListener('seeking', () => onVerseSeek(entry));
   video.addEventListener('seeked', () => onVerseSeek(entry));
@@ -966,7 +1106,7 @@ async function addTile(lang) {
   selColl.setAttribute('aria-label', t('collLbl') + ' — ' + langLabel);
   sel.setAttribute('aria-label', t('progLbl') + ' — ' + langLabel);
   const entry = { code: lang.code, coll: lang.coll || 'StudioMonthlyPrograms', prog: lang.prog || '',
-                  video, audioBtn: tile.querySelector('.audio'), tile, sel, selColl, status, items: [], armWatchdog, resetRetry, nomsg, note, want: lang.want || '', statusKey: 'loading' };
+                  video, audioBtn: tile.querySelector('.audio'), mainBtn: tile.querySelector('.main'), tile, sel, selColl, status, items: [], armWatchdog, resetRetry, nomsg, note, want: lang.want || '', statusKey: 'loading' };
   tiles.set(lang.code, entry);
   selColl.value = entry.coll;
   updateCounter(); saveState(); refreshGlobalPicker();
@@ -978,16 +1118,28 @@ async function addTile(lang) {
     await loadTileProgram(entry, it);
   });
   entry.audioBtn.addEventListener('click', () => muteOthers(audible === entry ? null : entry));
+  entry.mainBtn.addEventListener('click', () => setMainTile(mainCode === entry.code ? '' : entry.code));
   video.addEventListener('volumechange', () => onNativeVolume(entry));
   video.volume = masterVol;
   tile.querySelector('.fs').addEventListener('click', () => {
     if (document.fullscreenElement) document.exitFullscreen();
     else tile.requestFullscreen().catch(() => {});
   });
+  const pipBtn = tile.querySelector('.pip');
+  if ('pictureInPictureEnabled' in document && document.pictureInPictureEnabled) { // browsers without PiP simply keep the button hidden
+    pipBtn.hidden = false;
+    pipBtn.addEventListener('click', () => {
+      if (document.pictureInPictureElement === video) document.exitPictureInPicture().catch(() => {});
+      else video.requestPictureInPicture().catch(() => {});
+    });
+    video.addEventListener('enterpictureinpicture', () => pipBtn.classList.add('on'));
+    video.addEventListener('leavepictureinpicture', () => pipBtn.classList.remove('on'));
+  }
   tile.querySelector('.rm').addEventListener('click', () => {
     cancelRetry(entry); video.pause(); video.removeAttribute('src'); video.load();
     if (audible === entry) audible = null;
     tiles.delete(lang.code); tile.remove(); updateRetryUI();
+    if (mainCode === lang.code) setMainTile('');
     updateCounter(); saveState(); refreshGlobalPicker(); renderAddList();
   });
 
@@ -1150,10 +1302,18 @@ document.getElementById('globApply').addEventListener('click', async () => {
 });
 
 async function loadCatalog() {
+  const note = document.getElementById('catalogNote');
+  const cached = metaRead('catalog:E'); // a saved catalogue makes the panel usable while the API answers
+  if (cached) { ALL_SIGN_LANGS = sanitizeCatalog(cached.data); renderAddList(); }
   try {
     const d = await fetchJSON(`${API}/languages/E/all?clientType=www`);
     ALL_SIGN_LANGS = (d.languages || []).filter(l => l.isSignLanguage).sort((a, b) => a.name.localeCompare(b.name));
-  } catch (e) { ALL_SIGN_LANGS = []; }
+    metaWrite('catalog:E', ALL_SIGN_LANGS.map(l => ({ code: l.code, name: l.name, vernacular: l.vernacular || '' })));
+    note.textContent = '';
+  } catch (e) {
+    if (cached && ALL_SIGN_LANGS.length) note.textContent = t('catalogCached')(fmtDate(cached.ts)); // say how old the saved copy is
+    else ALL_SIGN_LANGS = [];
+  }
   renderAddList();
 }
 function renderAddList() {
@@ -1193,12 +1353,13 @@ document.getElementById('addSearch').addEventListener('input', renderAddList);
 function validLanguageCode(code) {
   return typeof code === 'string' && /^[A-Z][A-Z0-9]{0,19}$/.test(code);
 }
-function buildShareHash(codes, coll, prog) {
+function buildShareHash(codes, coll, prog, perTile) { // perTile: [{code, coll, prog}] for tiles that differ from the common selection
   const p = new URLSearchParams();
   p.set('l', codes.join(','));
   if (coll) p.set('c', coll);
   if (prog) p.set('p', prog);
-  return p.toString().replace(/%2C/g, ',');
+  if (perTile && perTile.length) p.set('t', perTile.map(x => x.code + ':' + x.coll + ':' + (x.prog || '')).join(','));
+  return p.toString().replace(/%2C/g, ',').replace(/%3A/g, ':');
 }
 // Returns { langs } or null. Every value is validated; nothing from the URL is trusted.
 function parseShareHash(hash, collKeys) {
@@ -1208,7 +1369,15 @@ function parseShareHash(hash, collKeys) {
   if (!codes.length) return null;
   const coll = collKeys.includes(p.get('c')) ? p.get('c') : '';
   const prog = /^[A-Za-z0-9_.-]{1,80}$/.test(p.get('p') || '') ? p.get('p') : '';
-  return { langs: codes.map(code => coll ? (prog ? { code, coll, prog } : { code, coll }) : { code }) };
+  const langs = codes.map(code => coll ? (prog ? { code, coll, prog } : { code, coll }) : { code });
+  for (const part of (p.get('t') || '').split(',')) { // per-tile overrides: each keeps its own publication
+    if (!part) continue;
+    const [tc, tcol, tprog] = part.split(':');
+    if (!validLanguageCode(tc) || !collKeys.includes(tcol || '') || (tprog && !/^[A-Za-z0-9_.-]{1,80}$/.test(tprog))) continue;
+    const l = langs.find(y => y.code === tc);
+    if (l) { l.coll = tcol; if (tprog) l.prog = tprog; else delete l.prog; }
+  }
+  return { langs };
 }
 function restoredLanguages(langs, catalog) {
   const seen = new Set();
@@ -1261,8 +1430,11 @@ document.getElementById('addAll').addEventListener('click', addCatalogLanguages)
 document.getElementById('shareBtn').addEventListener('click', () => {
   const list = [...tiles.values()];
   if (!list.length) return;
-  const ref = list.find(x => x.prog) || list[0]; // the link carries one shared collection and publication
-  const url = location.origin + location.pathname + '#' + buildShareHash(list.map(x => x.code), ref.coll, ref.prog);
+  const ref = list.find(x => x.prog) || list[0]; // common collection and publication; differing tiles ride along
+  const refProg = ref.prog || '';
+  const perTile = list.filter(x => x.coll !== ref.coll || (x.prog || x.want || '') !== refProg)
+    .map(x => ({ code: x.code, coll: x.coll, prog: x.prog || x.want || '' }));
+  const url = location.origin + location.pathname + '#' + buildShareHash(list.map(x => x.code), ref.coll, ref.prog, perTile);
   const fallback = () => window.prompt(t('sharePrompt'), url);
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(() => flashNotice(t('shareCopied'), 4000), fallback);
   else fallback();
@@ -1272,7 +1444,7 @@ document.getElementById('stopAdd').addEventListener('click', () => { stopAddingA
 function removeAllTiles() {
   mosaicGen++; stopAddingAll = true; // stop an Add-all loop that is still running
   for (const x of [...tiles.values()]) { cancelRetry(x); x.video.pause(); x.video.removeAttribute('src'); x.video.load(); x.tile.remove(); }
-  tiles.clear(); audible = null; cancelSync(); updateRetryUI();
+  tiles.clear(); audible = null; mainCode = ''; grid.classList.remove('featured'); cancelSync(); updateRetryUI();
   updateCounter(); saveState(); refreshGlobalPicker(true); renderAddList();
 }
 document.getElementById('rmAll').addEventListener('click', () => {
@@ -1320,6 +1492,11 @@ function applyI18n() {
   document.getElementById('fwd10').textContent = t('fwd10');
   document.getElementById('jumpSlider').setAttribute('aria-label', t('posLbl'));
   document.getElementById('vol').value = masterVol;
+  document.getElementById('tQual').textContent = t('qualLbl');
+  const qs = document.getElementById('quality');
+  qs.setAttribute('aria-label', t('qualLbl')); qs.title = t('qualTip');
+  qs.options[0].textContent = t('q240'); qs.options[1].textContent = t('q480'); qs.options[2].textContent = t('q720');
+  document.getElementById('grid').setAttribute('aria-label', t('gridLbl'));
   document.getElementById('langES').classList.toggle('active', LANG === 'es');
   document.getElementById('langEN').classList.toggle('active', LANG === 'en');
   updateCounter();
@@ -1347,12 +1524,15 @@ function setLang(l) {
     x.tile.querySelector('.fs').setAttribute('aria-label', t('fsTip'));
     x.tile.querySelector('.rm').title = t('rmTip');
     x.tile.querySelector('.rm').setAttribute('aria-label', t('rmTip'));
+    x.tile.querySelector('.pip').title = t('pipTip');
+    x.tile.querySelector('.pip').setAttribute('aria-label', t('pipTip'));
     const lbl = x.tile.querySelector('.lang').textContent;
     x.selColl.setAttribute('aria-label', t('collLbl') + ' — ' + lbl);
     x.sel.setAttribute('aria-label', t('progLbl') + ' — ' + lbl);
   }
   refreshGlobalPicker(true);
   for (const x of tiles.values()) relabelTile(x);
+  setMainTile(mainCode); // the main/unmain titles follow the interface language
   renderAddList();
 }
 document.getElementById('langES').addEventListener('click', () => setLang('es'));
@@ -1361,6 +1541,22 @@ document.getElementById('langEN').addEventListener('click', () => setLang('en'))
 document.getElementById('playAll').addEventListener('click', startTogether);
 document.getElementById('pauseAll').addEventListener('click', () => { cancelSync(); userPaused = true; for (const x of tiles.values()) { x.shouldPlay = false; x.video.pause(); } });
 document.getElementById('syncAll').addEventListener('click', startTogether);
+function anyPlaying() { return activeVideos().some(v => !v.paused && !v.ended); }
+function togglePlayAll() { // one key for both: pause everything when anything plays, otherwise start together
+  if (anyPlaying()) { cancelSync(); userPaused = true; for (const x of tiles.values()) { x.shouldPlay = false; x.video.pause(); } }
+  else startTogether();
+}
+document.addEventListener('keydown', (e) => { // mosaic shortcuts; form fields and focused buttons keep their own keys
+  if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+  const el = e.target, tag = el && el.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (el && el.isContentEditable)) return;
+  if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+  const k = (e.key || '').toLowerCase();
+  if (k === ' ' || k === 'k') { e.preventDefault(); togglePlayAll(); }
+  else if (k === 's') { e.preventDefault(); startTogether(); }
+  else if (k === 'j' || e.key === 'ArrowLeft') { e.preventDefault(); skipAll(-10); }
+  else if (k === 'l' || e.key === 'ArrowRight') { e.preventDefault(); skipAll(10); }
+});
 
 setInterval(() => { // keep the slider on the first playing tile
   const v = activeVideos().find(x => Number.isFinite(x.duration) && x.duration > 0);
@@ -1404,6 +1600,7 @@ setInterval(() => { for (const x of tiles.values()) loopVerse(x); }, 100); // ve
     await addTile({ ...l, label: l.label || labelFor(l.code) });
     await new Promise(r => setTimeout(r, 400)); // stagger: do not flood the network with N videos at once
   }
+  if (!shared && state.main && validLanguageCode(state.main)) setMainTile(state.main);
 })();
 </script>
 </body>

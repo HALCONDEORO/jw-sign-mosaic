@@ -12,8 +12,8 @@ It is free, with no accounts and no ads. Your language and program selection and
 **Why do some tiles say "Not available in this language"?**
 The usual cause is that the publication does not exist (yet) in that sign language on jw.org. In Bible mode it also appears when the language has no video of the chosen chapter, or has the chapter but no marker for the chosen verse; and a language whose file set does not match the curated books/brochures list shows it too. The page never substitutes a different video: a missing program is always shown as missing.
 
-**Why is the video only 240p?**
-Video at 240p costs less memory, battery and data per stream, which matters when many tiles play at once. The player prefers the 240p rendition when available, otherwise the lowest available MP4 resolution. How readable a small tile looks depends on your screen and viewing distance.
+**Why is the video 240p by default?**
+Video at 240p costs less memory, battery and data per stream, which matters when many tiles play at once. If a publication offers higher resolutions, the Quality selector in the toolbar switches every tile to 480p or 720p, keeping position and play/pause state. How readable a small tile looks depends on your screen and viewing distance; the featured tile (star button) gives one language a full-width view.
 
 **Can I watch two different programs at once?**
 Yes. Each tile has its own Section and Publication selectors, so any tile can show any of the supported sections and publications offered in its language. The "For all" selectors plus "Apply to all" are just the fast way to set every tile to the same program.
@@ -25,7 +25,7 @@ So that twenty videos do not talk over each other. The audio toggle on a tile (o
 Yes, with a single-column layout on narrow screens. Keep the tile count low on mobile: every tile is a live video stream, and how many a phone runs smoothly depends on the device and the data plan.
 
 **Does it work offline?**
-No. Everything (catalogue, media links, videos) is fetched live from jw.org each visit.
+Videos always stream live from jw.org, so playback needs a connection. The catalogue and publication listings are cached as metadata in your browser: if the jw.org API is unreachable, the page still opens with the saved lists, labelled with the date they were last updated.
 
 **Who can I contact about a problem or a takedown?**
 Open an issue in the repository. The README's terms section explains the takedown policy: if the rights holder asks for a change or removal, it will be done promptly.

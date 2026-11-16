@@ -14,6 +14,7 @@ function context(storage, blockedGetter = false) {
     const DEFAULT_CODES = ['LSE', 'ASL'];
     const VOL_KEY = 'jwSignMosaic.vol';
     let SEL = { coll: 'VODStudio', key: 'pub-test' };
+    let mainCode = '';
     const video = { volume: 1 };
     const tiles = new Map([['LSE', {code:'LSE', coll:'VODStudio', prog:'pub-test', video}]]);
     const slider = {value: 1};
@@ -77,7 +78,7 @@ test('startup defaults survive blocked storage and preserve the browser language
 });
 test('language changes update the live UI even when persistence fails', () => {
   const ctx = context(null, true);
-  vm.runInContext("let LANG = 'es'; let translated = false; const applyI18n = () => { translated = true; }; const refreshGlobalPicker = () => {}; const renderAddList = () => {}; tiles.clear();", ctx);
+  vm.runInContext("let LANG = 'es'; let translated = false; const applyI18n = () => { translated = true; }; const refreshGlobalPicker = () => {}; const renderAddList = () => {}; const setMainTile = () => {}; tiles.clear();", ctx);
   vm.runInContext(grab('setLang'), ctx);
   ctx.setLang('en');
   assert.equal(vm.runInContext('LANG', ctx), 'en');
