@@ -13,6 +13,8 @@ Twenty sign-language tiles with Psalm 23 selected. Video areas are heavily blurr
 
 ## Features
 
+- **Bible first**: section menus start with Bible book/chapter/verse, then Publications. Saved selections and shared links still take priority over menu order. The separate video-library Bible collection is labelled "Videos about the Bible" to avoid confusing it with passage selection. [Publication navigation plan](docs/section-navigation.md) records what is available and what still needs verified markers.
+
 - **All sign languages**: the sign languages returned by the official catalogue API (/languages/E/all), searchable by name or code ("Añadir lengua" panel). The 8 most common ones load by default.
 - **Publication picker**: each tile can play any video publication available in that language — Every video-library section offered on jw.org for that language: JW Broadcasting monthly programs plus the library collections (spiritual programs, music, series, children's videos, meetings and ministry, ministry tools, Bible, movies, interviews...), grouped as they appear on jw.org.
 - **Books and brochures**: the publication list also includes books and brochures that have video. Every tile loads the same video in its own sign language, found through the pub-media API.
