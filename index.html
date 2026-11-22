@@ -274,6 +274,8 @@ const t = k => I18N[LANG][k];
 const DEFAULT_CODES = ['LSE','ASL','BSL','LSB','LSM','LSF','ISL','DGS'];
 const LS_KEY = 'jwSignMosaic.v2';
 function collectionsFor() { return [
+  ['BIBLE', t('bibleColl')],
+  ['PUBS', t('pubsColl')],
   ['StudioMonthlyPrograms', 'JW Broadcasting'],
   ['VODStudio', LANG === 'es' ? 'JW Broadcasting (archivo)' : 'JW Broadcasting (archive)'],
   ['VODProgramsEvents', LANG === 'es' ? 'Programas espirituales' : 'Spiritual programs'],
@@ -286,9 +288,7 @@ function collectionsFor() { return [
   ['VODMinistryTools', LANG === 'es' ? 'Ayudas para la predicación' : 'Ministry tools'],
   ['VODOurActivities', LANG === 'es' ? 'Qué hacemos' : 'What we do'],
   ['VODOurOrganization', LANG === 'es' ? 'Nuestra organización' : 'Our organization'],
-  ['VODBible', LANG === 'es' ? 'La Biblia' : 'The Bible'],
-  ['BIBLE', t('bibleColl')],
-  ['PUBS', t('pubsColl')],
+  ['VODBible', LANG === 'es' ? 'Vídeos sobre la Biblia' : 'Videos about the Bible'],
   ['VODMovies', LANG === 'es' ? 'Producciones audiovisuales' : 'Movies'],
   ['VODIntExp', LANG === 'es' ? 'Entrevistas y experiencias' : 'Interviews and experiences'],
 ]; }
@@ -1646,4 +1646,4 @@ setInterval(() => { for (const x of tiles.values()) loopVerse(x); }, 100); // ve
 })();
 </script>
 </body>
-</html>
+   </html>
