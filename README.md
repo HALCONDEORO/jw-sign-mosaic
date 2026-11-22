@@ -5,6 +5,8 @@ Watch the same JW Broadcasting program — or any sign-language video publicatio
 
 **Live demo: https://halcondeoro.github.io/jw-sign-mosaic/**
 
+**[Try the offline synthetic layout demo](demo.html)** before loading any media. It uses invented shapes, not people or signing. Play/pause a simulated timeline, feature a tile and add a language. No JW catalogue, media, account, storage or analytics requests are made by that page. It demonstrates layout and controls, not live catalogue availability or real video synchronization. Open `demo.html` locally, or use the separate demo page on the project site once deployed. Hosting access logs are outside the page’s control.
+
 ![Twenty sign-language tiles with Psalm 23 selected. Video areas are heavily blurred; no recognizable video content is visible in this image.](docs/screenshot-20-languages.png)
 
 Twenty sign-language tiles with Psalm 23 selected. Video areas are heavily blurred; no recognizable video content is visible in this image.
