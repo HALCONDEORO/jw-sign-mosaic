@@ -24,3 +24,13 @@ test('demo respects reduced-motion and keyboard focus', () => {
   assert.match(html, /:focus-visible/);
   assert.match(html, /aria-live="polite"/);
 });
+
+test('demo clock formats the completed minute correctly', () => {
+  const fn = script.match(/function formatTime\(value\)\{[^\n]+\}/)[0];
+  const context = vm.createContext({}); vm.runInContext(fn, context);
+  assert.equal(context.formatTime(0), '00:00');
+  assert.equal(context.formatTime(59.9), '00:59');
+  assert.equal(context.formatTime(60), '01:00');
+  assert.equal(context.formatTime(70), '01:10');
+  assert.match(script, /textContent=formatTime\(seconds\)/);
+});
