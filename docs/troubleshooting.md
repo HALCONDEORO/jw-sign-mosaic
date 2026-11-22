@@ -38,4 +38,8 @@ The link encodes the languages in its `#` fragment, plus one shared section and 
 
 ## The catalogue will not load at all
 
-If the jw.org catalogue API does not answer, the "Add language" list shows no results and "Add all catalogue languages" reports "Catalogue unavailable". Your saved languages and tiles are kept; try again later. The page does not cache the catalogue, so it needs that API to be reachable on every visit.
+The page tries to refresh the language catalogue from the jw.org API on every visit. If that request fails and a usable catalogue was saved in this browser's `localStorage`, the saved list remains available and is labelled with its date. If there is no usable saved catalogue (for example after clearing site data or when storage is blocked), the "Add language" list shows no results and "Add all catalogue languages" reports "Catalogue unavailable". Your saved languages and tiles are kept; try again later. Saved metadata does not make the videos available offline.
+
+## I want to remove saved selections or cached lists
+
+Clear this site's storage/site data in your browser's settings. This removes the selection, preferences and cached catalogue/publication metadata together, so the next visit needs a live catalogue request to fill the language list and can save new data again. Closing the tab alone does not clear `localStorage`. The seven-day limit on using saved publication listings is not automatic deletion of the stored entries; the saved language catalogue has no age limit in the application.
