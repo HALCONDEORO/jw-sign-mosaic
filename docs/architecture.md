@@ -6,7 +6,7 @@ The whole application is a single `index.html` (about 1,400 lines): markup, CSS 
 
 ## Where the data comes from
 
-The page is a thin client over two public jw.org APIs plus the official CDN. The visitor's browser talks to these endpoints directly; the project never proxies or rehosts anything and persists nothing server-side. During a visit the page keeps only in-memory caches of metadata lookups (publication files, Bible chapters, listing titles) plus the browser's normal buffering; the in-memory maps live only for the visit.
+The page is a thin client over two public jw.org APIs plus the official CDN. The visitor's browser talks to these endpoints directly; the project never proxies or rehosts anything and persists nothing server-side. Some lookup maps live only in memory during the visit, while the language catalogue and publication listings also persist in the browser's `localStorage`. These saved records contain metadata, including titles and media links, not video or audio files. Normal browser buffering is separate from the application's metadata cache.
 
 | Purpose | Endpoint |
 |---|---|
@@ -22,9 +22,26 @@ The language catalogue and the publication listings of the built-in sections are
 - **Strict matching**: programs are matched across languages by a language-agnostic key. A language without the program gets a black "not available" cell; the page never substitutes another video.
 - **Synchronized playback**: Play all / Sync pause every tile, wait for a decodable frame per tile, seek them to a common timestamp, then start them together (a tile with a Bible verse selected starts at its own verse marker instead). A shared position slider and −10 s / +10 s buttons move every tile together (the APIs expose no chapter markers for non-Bible videos, so jumps are by relative position).
 - **One audio stream at a time**: a single volume slider; unmuting any tile mutes the rest.
-- **Optional storage**: the selection and volume persist in `localStorage`, wrapped so a blocked or full store degrades to a stateless visit instead of breaking the page.
+- **Optional storage**: selection, featured tile, interface language, quality and volume persist in `localStorage`, alongside the metadata cache described below. Reads and writes are wrapped so blocked access or a full store does not break the page; saving may fail.
 - **Share links**: the current selection is encoded in the URL hash (`#l=CODES&c=SECTION&p=PUBLICATION`): the language list plus one shared collection and publication (not a per-tile mix). Every value is validated on restore, and the hash is consumed once so later edits save normally.
 - **Internationalization**: a small string table drives the English and Spanish interfaces; publication titles come from the English or Spanish jw.org listings, falling back to the sign-language title.
+
+## Browser storage lifecycle
+
+| Storage key | Contents | Lifetime in the application |
+|---|---|---|
+| `jwSignMosaic.v2` | Tile language codes, collection/program selections, requested unavailable programs, shared selection and featured tile | No automatic expiry |
+| `jwSignMosaic.lang` | Interface language | No automatic expiry |
+| `jwSignMosaic.quality` | Preferred video quality | No automatic expiry |
+| `jwSignMosaic.vol` | Master volume | No automatic expiry |
+| `jwSignMosaic.meta.v1` | Timestamped language catalogue and reduced publication listings, including titles, identifiers and MP4 links | Catalogue has no read-age limit; publication listings are accepted for seven days |
+| `jwSignMosaic.langs.v1` | Legacy language selection, read only as a fallback when no usable v2 selection exists | No automatic removal during migration |
+
+`metaRead` checks a record's age only when a caller supplies an age limit. `cachedListing` uses seven days; `loadCatalog` supplies no age limit. A rejected old record is not deleted on read. On writes, `metaWrite` drops the oldest entries until the serialized JSON fits `META_LIMIT` (350 × 1024 JavaScript string code units, not a guarantee about storage bytes). The browser can also evict site storage.
+
+Saved catalogue data can fill the language list immediately, then `loadCatalog` requests a live refresh on each visit. Publication selectors can start from a recent saved listing, refresh from the API and fall back to that listing after a request failure. Partial or empty live publication results are not written to this cache. Cached entries are validated before use, and fallback lists are labelled with their saved date. This is metadata fallback, not offline video playback.
+
+Bible chapter media lookups and translated-title maps remain in memory for the visit. Clearing this site's browser storage removes the saved preferences, selection and metadata together; a later visit can create them again. `localStorage` is shared by pages on the same origin in the same browser profile, not a confidential store. See [Browser storage and privacy](legal.md#browser-storage-and-privacy) for the visitor-facing explanation.
 
 ## Tests and CI
 
