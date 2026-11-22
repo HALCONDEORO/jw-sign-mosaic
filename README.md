@@ -43,6 +43,8 @@ Twenty sign-language tiles with Psalm 23 selected. Video areas are heavily blurr
 
 Single `index.html`, no build step, no dependencies. Data comes from the public jw.org mediator API (`data.jw-api.org/mediator/v1`); videos stream from the official CDN. No media is downloaded to this repository, rehosted, proxied, cached by this application, or tracked. The browser streams media directly from JW servers. This is a custom HTML video player, not the official JW player or an iframe. Normal browser buffering still occurs.
 
+The application does persist **metadata and preferences** in the browser's `localStorage`: the language catalogue, publication listings (titles, identifiers and media links, not media files), saved selections, interface language, quality and volume. Closing the page does not erase that storage. Publication listings are used for up to seven days; this is a read-age limit, not automatic deletion. The saved language catalogue and preferences have no automatic expiry in the application. Clear this site's browser storage/site data to remove them. Pages on the same origin share access to that storage in the same browser profile. See [Browser storage and privacy](docs/legal.md#browser-storage-and-privacy) and [the storage lifecycle](docs/architecture.md#browser-storage-lifecycle).
+
 Use only for personal, noncommercial viewing. [JW terms](https://www.jw.org/en/terms-of-use/) apply. Direct streaming is not presented here as an official embedding authorization. The publishers permit sharing official links and restrict publication of their material on other websites/apps and marketing uses. No media license is granted by this repository.
 
 ## Tests

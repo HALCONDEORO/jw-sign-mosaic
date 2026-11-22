@@ -7,7 +7,10 @@ No. It is a personal, unaffiliated project. It is not endorsed by jw.org or its 
 No. Your browser streams the videos directly from jw.org servers. This repository contains only the page code, its tests and its documentation; no original or recognizable jw.org media is stored here (the README screenshot shows the interface with the video areas heavily blurred). Normal browser buffering still happens, the same as on any video site.
 
 **Is it free? Does it track anything?**
-It is free, with no accounts and no ads. Your language and program selection and the volume are saved only in your own browser's localStorage, and a shared link additionally carries the selection in its URL fragment.
+It is free, with no accounts and no ads. The page saves your selection and preferences (including interface language, quality, volume and featured tile) in your browser's `localStorage`. It also saves catalogue and publication-list metadata, including titles and media links, but not video or audio files. These records can survive closing the page. A shared link additionally carries the selection in its URL fragment. Browser storage is not a private vault: other pages on the same origin and people using the same browser profile may access it. Requests go directly to jw.org and the site's host, whose policies also apply. See [Browser storage and privacy](legal.md#browser-storage-and-privacy).
+
+**How do I remove the saved data?**
+Clear this site's storage/site data in your browser's settings. This removes the saved selection, preferences and metadata together. A new visit can save data again. Publication listings are accepted for up to seven days, but that age check does not automatically erase old entries; the language catalogue and preferences have no automatic expiry in the application.
 
 **Why do some tiles say "Not available in this language"?**
 The usual cause is that the publication does not exist (yet) in that sign language on jw.org. In Bible mode it also appears when the language has no video of the chosen chapter, or has the chapter but no marker for the chosen verse; and a language whose file set does not match the curated books/brochures list shows it too. The page never substitutes a different video: a missing program is always shown as missing.
